@@ -6,16 +6,22 @@ import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import type {
   AgentProfile,
+  ApplicationStatus,
   AppointmentRecord,
+  ApprovedHospital,
   AuditLogEntry,
   AuthUser,
   DepartmentRecord,
+  HospitalApplication,
   HospitalNotification,
   IntegrationItem,
   OperationalTask,
   PatientRecord,
+  PlatformActivityItem,
   ResourceItem,
   StaffMember,
+  SubscriptionPlan,
+  SubscriptionRecord,
   UserRole,
   WorkflowDefinition,
 } from './src/types/careos.ts';
@@ -24,19 +30,12 @@ interface StoredUser extends AuthUser {
   passwordHash: string;
 }
 
-interface InquiryRecord {
-  id: string;
-  type: 'demo' | 'contact';
-  name: string;
-  email: string;
-  organization: string;
-  roleOrType: string;
-  message: string;
-  createdAt: string;
-}
-
 interface CareOSDatabase {
   users: StoredUser[];
+  applications: HospitalApplication[];
+  hospitals: ApprovedHospital[];
+  subscriptions: SubscriptionRecord[];
+  platformActivity: PlatformActivityItem[];
   hospitalSettings: {
     hospitalName: string;
     timezone: string;
@@ -54,7 +53,6 @@ interface CareOSDatabase {
   notifications: HospitalNotification[];
   staff: StaffMember[];
   auditLogs: AuditLogEntry[];
-  inquiries: InquiryRecord[];
 }
 
 interface TokenPayload {
@@ -76,7 +74,11 @@ const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'careos-db.json');
 
-// Session signing key from environment or ephemeral 256-bit secret in memory
+// Precomputed one-way scrypt hash for initial admin bootstrap when ADMIN_PASSWORD env var is unset
+const INITIAL_ADMIN_EMAIL = 'admin@careos.com';
+const INITIAL_ADMIN_SCRYPT_HASH =
+  'd19dc48f2f60f7f316bb08a96a8c171a:3449fa810320dd8124dbc92df0f5bf6f0a1b0fcee48214736409da5be88d2ab2fcabe90240a496472de4e4c5affec5a83bc90dec0b9a307abec29b1fb3333116';
+
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const revokedTokens = new Map<string, number>();
 
@@ -147,487 +149,153 @@ function getTodayDateString(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Clean zero-mock-data initial database
 function createInitialDatabase(): CareOSDatabase {
-  const today = getTodayDateString();
+  const seededAdmin: StoredUser = {
+    id: 'usr-super-admin',
+    fullName: 'Super Admin',
+    email: INITIAL_ADMIN_EMAIL,
+    role: 'admin',
+    hospitalName: 'CareOS Platform',
+    hospitalType: 'Platform Governance',
+    contactNumber: 'Platform Admin',
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    passwordHash: INITIAL_ADMIN_SCRYPT_HASH,
+  };
+
   return {
-    users: [],
+    users: [seededAdmin],
+    applications: [],
+    hospitals: [],
+    subscriptions: [],
+    platformActivity: [],
     hospitalSettings: {
-      hospitalName: 'Meridian General Medical Center (Sample)',
+      hospitalName: 'CareOS Platform',
       timezone: 'America/Los_Angeles',
       humanOversightRequired: true,
       sessionTimeoutMinutes: 480,
     },
-    patients: [
-      {
-        id: 'pat-101',
-        mrn: 'MRN-40821',
-        fullName: 'Eleanor Vance',
-        age: 64,
-        gender: 'Female',
-        phone: '+1 (415) 555-0142',
-        email: 'e.vance@sample-patient.org',
-        department: 'Cardiology',
-        attendingDoctor: 'Dr. Marcus Chen',
-        admissionStatus: 'Admitted',
-        wardBed: 'Cardio-3B · Bed 12',
-        lastVisit: today,
-        medicalSummary: 'Post-angioplasty telemetry observation; stable sinus rhythm, BP 124/78 mmHg.',
-        allergies: ['Penicillin'],
-        isSample: true,
-      },
-      {
-        id: 'pat-102',
-        mrn: 'MRN-40822',
-        fullName: 'David Morales',
-        age: 41,
-        gender: 'Male',
-        phone: '+1 (415) 555-0189',
-        email: 'd.morales@sample-patient.org',
-        department: 'Orthopedics',
-        attendingDoctor: 'Dr. Hannah Patel',
-        admissionStatus: 'Outpatient',
-        wardBed: 'Clinic Wing A',
-        lastVisit: today,
-        medicalSummary: 'ACL reconstruction 6-week follow-up; mobility progressing on schedule.',
-        allergies: ['None reported'],
-        isSample: true,
-      },
-      {
-        id: 'pat-103',
-        mrn: 'MRN-40823',
-        fullName: 'Amina Al-Mansoor',
-        age: 29,
-        gender: 'Female',
-        phone: '+1 (415) 555-0194',
-        email: 'a.mansoor@sample-patient.org',
-        department: 'Emergency',
-        attendingDoctor: 'Dr. Liam O’Connor',
-        admissionStatus: 'ICU Observation',
-        wardBed: 'ICU-North · Bay 04',
-        lastVisit: today,
-        medicalSummary: 'Acute respiratory distress stabilized; SpO2 97% on room air, awaiting pulmonology consult.',
-        allergies: ['Sulfa drugs'],
-        isSample: true,
-      },
-      {
-        id: 'pat-104',
-        mrn: 'MRN-40824',
-        fullName: 'Robert Takahashi',
-        age: 72,
-        gender: 'Male',
-        phone: '+1 (415) 555-0117',
-        email: 'r.takahashi@sample-patient.org',
-        department: 'Neurology',
-        attendingDoctor: 'Dr. Sarah Jenkins',
-        admissionStatus: 'Admitted',
-        wardBed: 'Neuro-2A · Bed 07',
-        lastVisit: today,
-        medicalSummary: 'Transient ischemic attack workup; MRI completed, antiplatelet regimen initiated.',
-        allergies: ['Latex'],
-        isSample: true,
-      },
-      {
-        id: 'pat-105',
-        mrn: 'MRN-40825',
-        fullName: 'Clara Lindqvist',
-        age: 8,
-        gender: 'Female',
-        phone: '+1 (415) 555-0165',
-        email: 'parent.lindqvist@sample-patient.org',
-        department: 'Pediatrics',
-        attendingDoctor: 'Dr. Priya Nair',
-        admissionStatus: 'Pre-Admission',
-        wardBed: 'Peds-Day Unit 02',
-        lastVisit: today,
-        medicalSummary: 'Scheduled pediatric tonsillectomy pre-operative clearance completed.',
-        allergies: ['None reported'],
-        isSample: true,
-      },
-      {
-        id: 'pat-106',
-        mrn: 'MRN-40826',
-        fullName: 'Samuel Okafor',
-        age: 55,
-        gender: 'Male',
-        phone: '+1 (415) 555-0133',
-        email: 's.okafor@sample-patient.org',
-        department: 'General Medicine',
-        attendingDoctor: 'Dr. Elena Rostova',
-        admissionStatus: 'Discharged',
-        wardBed: 'Discharged · Home Care',
-        lastVisit: today,
-        medicalSummary: 'Type 2 diabetes glycemic stabilization completed; outpatient follow-up booked in 14 days.',
-        allergies: ['Aspirin'],
-        isSample: true,
-      },
-      {
-        id: 'pat-107',
-        mrn: 'MRN-40827',
-        fullName: 'Mei-Ling Zhou',
-        age: 48,
-        gender: 'Female',
-        phone: '+1 (415) 555-0171',
-        email: 'm.zhou@sample-patient.org',
-        department: 'Cardiology',
-        attendingDoctor: 'Dr. Marcus Chen',
-        admissionStatus: 'Outpatient',
-        wardBed: 'Cardio Diagnostics',
-        lastVisit: today,
-        medicalSummary: 'Echocardiogram and stress test evaluation for intermittent palpitations.',
-        allergies: ['Iodine contrast'],
-        isSample: true,
-      },
-      {
-        id: 'pat-108',
-        mrn: 'MRN-40828',
-        fullName: 'Thomas Gallagher',
-        age: 61,
-        gender: 'Male',
-        phone: '+1 (415) 555-0158',
-        email: 't.gallagher@sample-patient.org',
-        department: 'Orthopedics',
-        attendingDoctor: 'Dr. Hannah Patel',
-        admissionStatus: 'Admitted',
-        wardBed: 'Ortho-4C · Bed 09',
-        lastVisit: today,
-        medicalSummary: 'Day 2 post-total knee arthroplasty; physical therapy milestone achieved.',
-        allergies: ['Codeine'],
-        isSample: true,
-      },
-    ],
-    appointments: [
-      {
-        id: 'apt-201',
-        patientId: 'pat-107',
-        patientName: 'Mei-Ling Zhou',
-        mrn: 'MRN-40827',
-        doctorName: 'Dr. Marcus Chen',
-        department: 'Cardiology',
-        date: today,
-        time: '09:00',
-        type: 'Diagnostic',
-        status: 'Completed',
-        notes: 'Transthoracic echocardiogram completed and summarized.',
-        isSample: true,
-      },
-      {
-        id: 'apt-202',
-        patientId: 'pat-102',
-        patientName: 'David Morales',
-        mrn: 'MRN-40822',
-        doctorName: 'Dr. Hannah Patel',
-        department: 'Orthopedics',
-        date: today,
-        time: '10:30',
-        type: 'Follow-up',
-        status: 'In Progress',
-        notes: 'Range-of-motion assessment and physiotherapy progression.',
-        isSample: true,
-      },
-      {
-        id: 'apt-203',
-        patientId: 'pat-105',
-        patientName: 'Clara Lindqvist',
-        mrn: 'MRN-40825',
-        doctorName: 'Dr. Priya Nair',
-        department: 'Pediatrics',
-        date: today,
-        time: '11:15',
-        type: 'Procedure',
-        status: 'Checked In',
-        notes: 'Pre-op anesthesia verification complete.',
-        isSample: true,
-      },
-      {
-        id: 'apt-204',
-        patientId: 'pat-101',
-        patientName: 'Eleanor Vance',
-        mrn: 'MRN-40821',
-        doctorName: 'Dr. Marcus Chen',
-        department: 'Cardiology',
-        date: today,
-        time: '13:00',
-        type: 'Consultation',
-        status: 'Scheduled',
-        notes: 'Afternoon ward round and telemetry discharge evaluation.',
-        isSample: true,
-      },
-      {
-        id: 'apt-205',
-        patientId: 'pat-104',
-        patientName: 'Robert Takahashi',
-        mrn: 'MRN-40824',
-        doctorName: 'Dr. Sarah Jenkins',
-        department: 'Neurology',
-        date: today,
-        time: '14:30',
-        type: 'Follow-up',
-        status: 'Scheduled',
-        notes: 'Review brain MRI perfusion report with neurology team.',
-        isSample: true,
-      },
-      {
-        id: 'apt-206',
-        patientId: 'pat-106',
-        patientName: 'Samuel Okafor',
-        mrn: 'MRN-40826',
-        doctorName: 'Dr. Elena Rostova',
-        department: 'General Medicine',
-        date: today,
-        time: '16:00',
-        type: 'Telehealth',
-        status: 'Scheduled',
-        notes: 'Remote post-discharge glucose log check-in.',
-        isSample: true,
-      },
-    ],
-    departments: [
-      {
-        id: 'dept-cardio',
-        name: 'Cardiology',
-        head: 'Dr. Marcus Chen',
-        activePatients: 34,
-        staffOnDuty: 18,
-        totalStaff: 22,
-        bedCapacity: 40,
-        occupiedBeds: 31,
-        avgWaitMinutes: 11,
-        status: 'Nominal',
-      },
-      {
-        id: 'dept-er',
-        name: 'Emergency',
-        head: 'Dr. Liam O’Connor',
-        activePatients: 29,
-        staffOnDuty: 24,
-        totalStaff: 26,
-        bedCapacity: 32,
-        occupiedBeds: 27,
-        avgWaitMinutes: 16,
-        status: 'Elevated',
-      },
-      {
-        id: 'dept-neuro',
-        name: 'Neurology',
-        head: 'Dr. Sarah Jenkins',
-        activePatients: 21,
-        staffOnDuty: 14,
-        totalStaff: 16,
-        bedCapacity: 28,
-        occupiedBeds: 19,
-        avgWaitMinutes: 9,
-        status: 'Nominal',
-      },
-      {
-        id: 'dept-ortho',
-        name: 'Orthopedics',
-        head: 'Dr. Hannah Patel',
-        activePatients: 26,
-        staffOnDuty: 15,
-        totalStaff: 18,
-        bedCapacity: 30,
-        occupiedBeds: 22,
-        avgWaitMinutes: 13,
-        status: 'Nominal',
-      },
-      {
-        id: 'dept-peds',
-        name: 'Pediatrics',
-        head: 'Dr. Priya Nair',
-        activePatients: 18,
-        staffOnDuty: 16,
-        totalStaff: 19,
-        bedCapacity: 26,
-        occupiedBeds: 14,
-        avgWaitMinutes: 8,
-        status: 'Nominal',
-      },
-      {
-        id: 'dept-genmed',
-        name: 'General Medicine',
-        head: 'Dr. Elena Rostova',
-        activePatients: 42,
-        staffOnDuty: 21,
-        totalStaff: 25,
-        bedCapacity: 54,
-        occupiedBeds: 43,
-        avgWaitMinutes: 14,
-        status: 'Elevated',
-      },
-    ],
-    resources: [
-      { id: 'res-1', name: 'ICU Critical Care Beds', category: 'Beds', department: 'Emergency & ICU', total: 36, available: 6, inUse: 28, maintenance: 2 },
-      { id: 'res-2', name: 'General Inpatient Beds', category: 'Beds', department: 'General Medicine', total: 120, available: 28, inUse: 88, maintenance: 4 },
-      { id: 'res-3', name: 'Telemetry Monitored Beds', category: 'Beds', department: 'Cardiology', total: 54, available: 14, inUse: 38, maintenance: 2 },
-      { id: 'res-4', name: 'Mechanical Ventilators', category: 'Critical Equipment', department: 'Respiratory / ICU', total: 28, available: 11, inUse: 16, maintenance: 1 },
-      { id: 'res-5', name: 'Portable Ultrasound Units', category: 'Critical Equipment', department: 'Emergency', total: 14, available: 5, inUse: 9, maintenance: 0 },
-      { id: 'res-6', name: 'MRI & CT Imaging Suites', category: 'Diagnostic Suites', department: 'Radiology', total: 6, available: 2, inUse: 4, maintenance: 0 },
-      { id: 'res-7', name: 'Surgical Operating Suites', category: 'Operating Rooms', department: 'Surgery', total: 12, available: 4, inUse: 7, maintenance: 1 },
-    ],
+    patients: [],
+    appointments: [],
+    departments: [],
+    resources: [],
     agents: [
       {
-        id: 'agent-patient',
-        name: 'Patient Intelligence Agent',
-        shortName: 'Patient Intel',
-        category: 'Front-Door & Intake',
-        description: 'Coordinates patient onboarding, pre-visit intake, appointment confirmations, and multilingual chat or voice inquiries.',
-        highlights: ['Patient onboarding', 'Appointment coordination', 'Voice and chat interactions'],
-        status: 'Active',
-        assignedTasks: 148,
-        completedTasks: 139,
-        pendingTasks: 9,
-        avgResponseSeconds: 1.8,
-        recentActivity: [
-          { id: 'act-1', timestamp: '10:42 AM', summary: 'Verified pre-admission intake questionnaire for Clara Lindqvist', department: 'Pediatrics', outcome: 'Completed' },
-          { id: 'act-2', timestamp: '10:19 AM', summary: 'Confirmed afternoon telehealth slot with Samuel Okafor', department: 'General Medicine', outcome: 'Completed' },
-        ],
-      },
-      {
         id: 'agent-clinical',
-        name: 'Clinical Intelligence Agent',
-        shortName: 'Clinical Intel',
+        name: 'Clinical Assistant',
+        shortName: 'Clinical',
         category: 'Clinical Documentation',
-        description: 'Synthesizes longitudinal medical records, retrieves relevant history before consults, and drafts structured clinical notes for clinician sign-off.',
+        description: 'Synthesizes authorized patient history and prepares structured pre-consult briefs for clinician sign-off.',
         highlights: ['Medical record summaries', 'Patient history retrieval', 'Clinical documentation assistance'],
         status: 'Active',
-        assignedTasks: 96,
-        completedTasks: 91,
-        pendingTasks: 5,
-        avgResponseSeconds: 2.4,
-        recentActivity: [
-          { id: 'act-3', timestamp: '10:35 AM', summary: 'Compiled 12-month cardiac telemetry summary for Dr. Marcus Chen', department: 'Cardiology', outcome: 'Awaiting Review' },
-          { id: 'act-4', timestamp: '09:50 AM', summary: 'Structured MRI perfusion pre-read brief for neurology consult', department: 'Neurology', outcome: 'Completed' },
-        ],
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
+      },
+      {
+        id: 'agent-operations',
+        name: 'Operations Agent',
+        shortName: 'Operations',
+        category: 'Shift & Task Coordination',
+        description: 'Coordinates hospital shift handoffs, operational tasks, and cross-department queue routing.',
+        highlights: ['Staff coordination', 'Operational tasks', 'Bottleneck identification'],
+        status: 'Active',
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
+      },
+      {
+        id: 'agent-analytics',
+        name: 'Analytics Agent',
+        shortName: 'Analytics',
+        category: 'Executive Analytics',
+        description: 'Aggregates cross-department operational activity into wait-time and capacity insights.',
+        highlights: ['Hospital analytics', 'Performance insights', 'Cross-department intelligence'],
+        status: 'Active',
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
+      },
+      {
+        id: 'agent-compliance',
+        name: 'Compliance Agent',
+        shortName: 'Compliance',
+        category: 'Governance & Audit',
+        description: 'Verifies onboarding documentation completeness, consent boundaries, and audit trail integrity.',
+        highlights: ['Document verification', 'Consent checks', 'Audit log monitoring'],
+        status: 'Active',
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
+      },
+      {
+        id: 'agent-support',
+        name: 'Support Agent',
+        shortName: 'Support',
+        category: 'Onboarding & Intake',
+        description: 'Assists new hospital applicants with onboarding requests, document submissions, and scheduling.',
+        highlights: ['Hospital onboarding', 'Application intake', 'Workspace guidance'],
+        status: 'Active',
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
       },
       {
         id: 'agent-flow',
         name: 'Patient Flow Agent',
-        shortName: 'Patient Flow',
-        category: 'Throughput & Routing',
-        description: 'Coordinates outpatient queues, triage handoffs, inpatient admissions, and discharge readiness across clinical wards.',
-        highlights: ['Queue coordination', 'Admission and discharge workflows', 'Patient journey coordination'],
+        shortName: 'Flow',
+        category: 'Throughput & Beds',
+        description: 'Coordinates outpatient queues, inpatient admissions, and bed turnover readiness.',
+        highlights: ['Queue coordination', 'Admission workflows', 'Discharge turnover'],
         status: 'Active',
-        assignedTasks: 112,
-        completedTasks: 104,
-        pendingTasks: 8,
-        avgResponseSeconds: 1.5,
-        recentActivity: [
-          { id: 'act-5', timestamp: '10:48 AM', summary: 'Triggered discharge clearance checklist for Ward 3B Bed 12', department: 'Cardiology', outcome: 'Awaiting Review' },
-          { id: 'act-6', timestamp: '10:05 AM', summary: 'Rebalanced Emergency triage queue to Fast-Track Bay 2', department: 'Emergency', outcome: 'Completed' },
-        ],
-      },
-      {
-        id: 'agent-operations',
-        name: 'Operations Intelligence Agent',
-        shortName: 'Operations Intel',
-        category: 'Shift & Task Coordination',
-        description: 'Orchestrates inter-department operational tasks, shift handoff rosters, and early detection of clinical bottlenecks.',
-        highlights: ['Staff coordination', 'Operational tasks', 'Bottleneck identification'],
-        status: 'Active',
-        assignedTasks: 84,
-        completedTasks: 77,
-        pendingTasks: 7,
-        avgResponseSeconds: 2.1,
-        recentActivity: [
-          { id: 'act-7', timestamp: '10:30 AM', summary: 'Flagged elevated Radiology transport queue and dispatched porter shift', department: 'Emergency', outcome: 'Completed' },
-          { id: 'act-8', timestamp: '09:40 AM', summary: 'Synchronized morning nursing shift handoff across 6 departments', department: 'General Medicine', outcome: 'Completed' },
-        ],
-      },
-      {
-        id: 'agent-resource',
-        name: 'Resource Intelligence Agent',
-        shortName: 'Resource Intel',
-        category: 'Capacity & Assets',
-        description: 'Tracks real-time bed turnover, critical equipment readiness, operating room utilization, and sterilization schedules.',
-        highlights: ['Bed availability', 'Equipment tracking', 'Resource utilization'],
-        status: 'Active',
-        assignedTasks: 73,
-        completedTasks: 69,
-        pendingTasks: 4,
-        avgResponseSeconds: 1.9,
-        recentActivity: [
-          { id: 'act-9', timestamp: '10:44 AM', summary: 'Marked ICU-North Bay 02 sanitized and ready for incoming transfer', department: 'Emergency', outcome: 'Completed' },
-          { id: 'act-10', timestamp: '09:58 AM', summary: 'Assigned portable ultrasound unit #4 to Cardiology Diagnostics', department: 'Cardiology', outcome: 'Completed' },
-        ],
-      },
-      {
-        id: 'agent-hospital',
-        name: 'Hospital Intelligence Agent',
-        shortName: 'Hospital Intel',
-        category: 'Executive Analytics',
-        description: 'Aggregates cross-department operational patterns into executive forecasts, wait-time insights, and capacity recommendations.',
-        highlights: ['Hospital analytics', 'Performance insights', 'Cross-department intelligence'],
-        status: 'Monitoring',
-        assignedTasks: 45,
-        completedTasks: 43,
-        pendingTasks: 2,
-        avgResponseSeconds: 3.1,
-        recentActivity: [
-          { id: 'act-11', timestamp: '10:15 AM', summary: 'Published morning hospital occupancy & throughput digest', department: 'Executive', outcome: 'Completed' },
-          { id: 'act-12', timestamp: '08:30 AM', summary: 'Identified 18% reduction in Cardiology clinic turnaround time', department: 'Cardiology', outcome: 'Completed' },
-        ],
+        assignedTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        avgResponseSeconds: 0,
+        recentActivity: [],
       },
     ],
     workflows: [
       {
-        id: 'wf-1',
-        name: 'Automated Inpatient Discharge & Bed Turnover',
-        description: 'Coordinates clinician discharge sign-off, pharmacy reconciliation, environmental services cleaning, and bed availability updates.',
+        id: 'wf-onboarding',
+        name: 'Hospital Application Review & Provisioning',
+        description: 'Routes incoming hospital applications to Super Admin review, provisions HSP ID, and activates workspace upon approval.',
+        trigger: 'Hospital submits onboarding or signup request',
+        condition: 'Organization details and contact email validated',
+        agentId: 'agent-compliance',
+        agentName: 'Compliance Agent',
+        action: 'Validate registration fields & queue for Super Admin decision',
+        requiresApproval: true,
+        completionOutcome: 'Hospital added to Directory & workspace activated',
+        active: true,
+        executionsCount: 0,
+        lastRunAt: 'No runs yet',
+      },
+      {
+        id: 'wf-discharge',
+        name: 'Inpatient Discharge & Bed Turnover',
+        description: 'Coordinates discharge clearance, sanitization, and bed availability updates once patients are admitted.',
         trigger: 'Attending marks patient ready for discharge',
-        condition: 'Lab & medication reconciliation verified',
+        condition: 'Medication & lab clearance verified',
         agentId: 'agent-flow',
         agentName: 'Patient Flow Agent',
-        action: 'Notify Environmental Services & reserve bed for ED boarding queue',
+        action: 'Notify Environmental Services and update bed capacity',
         requiresApproval: true,
-        completionOutcome: 'Bed status updated to Available and incoming admission routed',
+        completionOutcome: 'Bed marked available for incoming admission',
         active: true,
-        executionsCount: 38,
-        lastRunAt: 'Today, 10:18 AM',
-      },
-      {
-        id: 'wf-2',
-        name: 'Pre-Consultation Clinical Brief Generation',
-        description: 'Compiles recent labs, imaging reports, and allergy alerts 30 minutes prior to specialist consultation.',
-        trigger: 'Patient checks in for specialist appointment',
-        condition: 'Prior records or external labs exist in profile',
-        agentId: 'agent-clinical',
-        agentName: 'Clinical Intelligence Agent',
-        action: 'Assemble structured 1-page pre-consult clinical summary',
-        requiresApproval: true,
-        completionOutcome: 'Brief attached to attending physician schedule for review',
-        active: true,
-        executionsCount: 64,
-        lastRunAt: 'Today, 10:35 AM',
-      },
-      {
-        id: 'wf-3',
-        name: 'Emergency Surge Staffing & Equipment Rebalance',
-        description: 'Monitors ED bay occupancy and notifies nursing supervisor and transport pool when threshold exceeds 82%.',
-        trigger: 'Emergency occupancy exceeds 82% for 15 minutes',
-        condition: 'Adjacent general wards have >= 4 open beds',
-        agentId: 'agent-operations',
-        agentName: 'Operations Intelligence Agent',
-        action: 'Propose float nurse reallocation and prioritize telemetry transport',
-        requiresApproval: true,
-        completionOutcome: 'Supervisor approves shift rebalance and transport queue clears',
-        active: true,
-        executionsCount: 11,
-        lastRunAt: 'Today, 09:42 AM',
-      },
-      {
-        id: 'wf-4',
-        name: 'Outpatient Intake & Pre-Visit Reminder Sequence',
-        description: 'Collects digital intake forms and confirms attendance 24 hours before scheduled diagnostic or clinic visits.',
-        trigger: '24 hours prior to scheduled appointment',
-        condition: 'Intake packet incomplete or unconfirmed',
-        agentId: 'agent-patient',
-        agentName: 'Patient Intelligence Agent',
-        action: 'Send consent-aware reminder and intake link via preferred channel',
-        requiresApproval: false,
-        completionOutcome: 'Appointment confirmed and pre-visit questionnaire synced',
-        active: true,
-        executionsCount: 142,
-        lastRunAt: 'Today, 08:00 AM',
+        executionsCount: 0,
+        lastRunAt: 'No runs yet',
       },
     ],
     integrations: [
@@ -636,43 +304,43 @@ function createInitialDatabase(): CareOSDatabase {
         name: 'CareOS REST & Webhook API',
         category: 'APIs & Third-Party Apps',
         availability: 'supported',
-        description: 'Authenticated JSON REST endpoints and event webhooks for hospital systems and custom extensions.',
+        description: 'Authenticated JSON REST endpoints and event webhooks for hospital systems.',
         protocol: 'HTTPS / JSON / Bearer Auth',
-        connected: true,
+        connected: false,
       },
       {
         id: 'int-fhir',
         name: 'HL7 FHIR R4 Data Adapter',
         category: 'EMR & EHR Platforms',
         availability: 'supported',
-        description: 'Standards-based FHIR R4 schema mapper for patient demographics, appointments, and encounter synchronization.',
+        description: 'Standards-based FHIR R4 schema mapper for patient demographics and appointments.',
         protocol: 'FHIR R4 REST',
-        connected: true,
+        connected: false,
       },
       {
         id: 'int-calendar',
         name: 'Clinician Calendar Sync (iCal / CalDAV)',
         category: 'Calendar & Scheduling',
         availability: 'supported',
-        description: 'Two-way shift and outpatient appointment schedule synchronization with institutional calendars.',
+        description: 'Two-way shift and outpatient appointment schedule synchronization.',
         protocol: 'CalDAV / iCalendar',
-        connected: true,
+        connected: false,
       },
       {
         id: 'int-his',
-        name: 'Enterprise HIS Connectors (SAP / Oracle Health)',
+        name: 'Enterprise HIS Connectors',
         category: 'HIS & Hospital Management',
         availability: 'planned',
-        description: 'Direct bi-directional hospital billing, ADT, and ward management bridge for legacy HIS deployments.',
+        description: 'Direct bi-directional hospital billing, ADT, and ward management bridge.',
         protocol: 'HL7 v2 / MLLP',
         connected: false,
       },
       {
         id: 'int-epic',
-        name: 'Epic & Cerner App Orchard Connectors',
+        name: 'Epic & Cerner SMART Launch',
         category: 'EMR & EHR Platforms',
         availability: 'planned',
-        description: 'Certified SMART on FHIR embedded launch inside enterprise inpatient EHR workspaces.',
+        description: 'Certified SMART on FHIR embedded launch inside enterprise inpatient EHRs.',
         protocol: 'SMART on FHIR',
         connected: false,
       },
@@ -681,13 +349,13 @@ function createInitialDatabase(): CareOSDatabase {
         name: 'Hospital PBX & SIP Voice Gateway',
         category: 'Telephony Systems',
         availability: 'planned',
-        description: 'Direct SIP trunk routing for automated patient triage and appointment rescheduling calls.',
+        description: 'Direct SIP trunk routing for automated patient triage and scheduling calls.',
         protocol: 'SIP / WebRTC',
         connected: false,
       },
       {
         id: 'int-whatsapp',
-        name: 'WhatsApp Business & SMS Care Channel',
+        name: 'WhatsApp Business & SMS Channel',
         category: 'WhatsApp & Messaging',
         availability: 'planned',
         description: 'Opt-in patient appointment reminders and post-discharge check-in messaging.',
@@ -695,102 +363,10 @@ function createInitialDatabase(): CareOSDatabase {
         connected: false,
       },
     ],
-    tasks: [
-      {
-        id: 'tsk-1',
-        title: 'Approve Cardiology Ward 3B Bed 12 discharge turnover',
-        department: 'Cardiology',
-        assignedAgent: 'Patient Flow Agent',
-        priority: 'High',
-        status: 'Pending',
-        dueTime: '11:30 AM',
-      },
-      {
-        id: 'tsk-2',
-        title: 'Review AI-drafted cardiac telemetry summary for MRN-40821',
-        department: 'Cardiology',
-        assignedAgent: 'Clinical Intelligence Agent',
-        priority: 'Normal',
-        status: 'In Progress',
-        dueTime: '12:15 PM',
-      },
-      {
-        id: 'tsk-3',
-        title: 'Confirm float RN assignment for Emergency afternoon surge',
-        department: 'Emergency',
-        assignedAgent: 'Operations Intelligence Agent',
-        priority: 'Urgent',
-        status: 'Pending',
-        dueTime: '11:45 AM',
-      },
-      {
-        id: 'tsk-4',
-        title: 'Verify pediatric pre-op consent packet for Clara Lindqvist',
-        department: 'Pediatrics',
-        assignedAgent: 'Patient Intelligence Agent',
-        priority: 'Normal',
-        status: 'Completed',
-        dueTime: '10:30 AM',
-      },
-    ],
-    notifications: [
-      {
-        id: 'not-1',
-        title: 'Emergency Department capacity at 84%',
-        detail: 'Operations Intelligence Agent prepared a float staffing recommendation for supervisor review.',
-        department: 'Emergency',
-        severity: 'warning',
-        timestamp: '12 mins ago',
-        read: false,
-      },
-      {
-        id: 'not-2',
-        title: 'Clinical brief ready for review',
-        detail: 'Pre-consult summary for Eleanor Vance (MRN-40821) is awaiting attending clinician sign-off.',
-        department: 'Cardiology',
-        severity: 'info',
-        timestamp: '28 mins ago',
-        read: false,
-      },
-      {
-        id: 'not-3',
-        title: 'ICU-North Bay 02 cleared for transfer',
-        detail: 'Environmental Services completed terminal sanitization; bed marked available.',
-        department: 'Emergency',
-        severity: 'info',
-        timestamp: '54 mins ago',
-        read: true,
-      },
-    ],
-    staff: [
-      { id: 'stf-1', name: 'Dr. Marcus Chen', role: 'Chief of Cardiology', department: 'Cardiology', shift: '07:00 – 19:00', availability: 'On Duty', activeCases: 8 },
-      { id: 'stf-2', name: 'Dr. Liam O’Connor', role: 'Emergency Attending', department: 'Emergency', shift: '08:00 – 20:00', availability: 'On Duty', activeCases: 11 },
-      { id: 'stf-3', name: 'Dr. Sarah Jenkins', role: 'Senior Neurologist', department: 'Neurology', shift: '08:00 – 17:00', availability: 'In Procedure', activeCases: 6 },
-      { id: 'stf-4', name: 'Dr. Hannah Patel', role: 'Orthopedic Surgeon', department: 'Orthopedics', shift: '07:30 – 18:30', availability: 'On Duty', activeCases: 7 },
-      { id: 'stf-5', name: 'Dr. Priya Nair', role: 'Pediatric Specialist', department: 'Pediatrics', shift: '08:00 – 16:30', availability: 'On Duty', activeCases: 5 },
-      { id: 'stf-6', name: 'Dr. Elena Rostova', role: 'Internal Medicine Lead', department: 'General Medicine', shift: '09:00 – 19:00', availability: 'On Call', activeCases: 9 },
-    ],
-    auditLogs: [
-      {
-        id: 'aud-1',
-        timestamp: new Date(Date.now() - 3600_000).toISOString(),
-        actorEmail: 'system@careos.internal',
-        actorRole: 'system',
-        action: 'SAMPLE_DATASET_INITIALIZED',
-        resource: 'careos-hospital-sample',
-        outcome: 'Allowed',
-      },
-      {
-        id: 'aud-2',
-        timestamp: new Date(Date.now() - 1800_000).toISOString(),
-        actorEmail: 'agent-clinical@careos.internal',
-        actorRole: 'agent',
-        action: 'CLINICAL_BRIEF_DRAFTED_FOR_HUMAN_REVIEW',
-        resource: 'MRN-40821',
-        outcome: 'Allowed',
-      },
-    ],
-    inquiries: [],
+    tasks: [],
+    notifications: [],
+    staff: [],
+    auditLogs: [],
   };
 }
 
@@ -805,7 +381,13 @@ function loadDatabase(): CareOSDatabase {
   }
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(raw) as CareOSDatabase;
+    const parsed = JSON.parse(raw) as CareOSDatabase;
+    // Ensure seeded admin exists if file was empty/legacy
+    if (!parsed.users.some((u) => u.role === 'admin')) {
+      parsed.users.unshift(createInitialDatabase().users[0]);
+      saveDatabase(parsed);
+    }
+    return parsed;
   } catch {
     const initial = createInitialDatabase();
     saveDatabase(initial);
@@ -824,7 +406,13 @@ function saveDatabase(db: CareOSDatabase): void {
 
 let db = loadDatabase();
 
-function appendAudit(actorEmail: string, actorRole: string, action: string, resource: string, outcome: 'Allowed' | 'Denied' = 'Allowed') {
+function appendAudit(
+  actorEmail: string,
+  actorRole: string,
+  action: string,
+  resource: string,
+  outcome: 'Allowed' | 'Denied' = 'Allowed'
+) {
   db.auditLogs.unshift({
     id: `aud-${crypto.randomUUID().slice(0, 8)}`,
     timestamp: new Date().toISOString(),
@@ -834,8 +422,35 @@ function appendAudit(actorEmail: string, actorRole: string, action: string, reso
     resource,
     outcome,
   });
-  if (db.auditLogs.length > 200) {
-    db.auditLogs = db.auditLogs.slice(0, 200);
+  if (db.auditLogs.length > 300) {
+    db.auditLogs = db.auditLogs.slice(0, 300);
+  }
+}
+
+function appendPlatformActivity(message: string, category: PlatformActivityItem['category']) {
+  db.platformActivity.unshift({
+    id: `act-${crypto.randomUUID().slice(0, 8)}`,
+    message,
+    category,
+    timestamp: new Date().toISOString(),
+  });
+  if (db.platformActivity.length > 100) {
+    db.platformActivity = db.platformActivity.slice(0, 100);
+  }
+}
+
+function appendNotification(title: string, detail: string, department: string, severity: 'info' | 'warning' | 'critical' = 'info') {
+  db.notifications.unshift({
+    id: `not-${crypto.randomUUID().slice(0, 8)}`,
+    title,
+    detail,
+    department,
+    severity,
+    timestamp: new Date().toISOString(),
+    read: false,
+  });
+  if (db.notifications.length > 50) {
+    db.notifications = db.notifications.slice(0, 50);
   }
 }
 
@@ -846,15 +461,145 @@ function getEnvAdminCredentials(): { email: string; password: string } | null {
   return { email, password };
 }
 
-function isAdminClaimed(): boolean {
-  return Boolean(getEnvAdminCredentials()) || db.users.some((u) => u.role === 'admin');
+function planDetails(plan: SubscriptionPlan): { monthlyPriceUsd: number; seatsIncluded: number } {
+  if (plan === 'Enterprise') return { monthlyPriceUsd: 2400, seatsIncluded: 250 };
+  if (plan === 'Pro') return { monthlyPriceUsd: 950, seatsIncluded: 75 };
+  return { monthlyPriceUsd: 350, seatsIncluded: 25 };
 }
 
-function computeOverview(range: string) {
+function createHospitalApplicationRecord(input: {
+  hospitalName: string;
+  hospitalType: string;
+  bedsCount?: number;
+  departmentsCount?: number;
+  location?: string;
+  address?: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  applicantUserId?: string;
+  notes?: string;
+}): HospitalApplication {
+  const seq = 1001 + db.applications.length;
+  const year = new Date().getFullYear();
+  const appRecord: HospitalApplication = {
+    id: `app-${crypto.randomUUID().slice(0, 8)}`,
+    applicationId: `APP-${year}-${seq}`,
+    hospitalName: input.hospitalName.trim(),
+    hospitalType: input.hospitalType.trim() || 'Multi-Specialty',
+    bedsCount: Number(input.bedsCount) || 100,
+    departmentsCount: Number(input.departmentsCount) || 8,
+    location: (input.location || 'Not specified').trim(),
+    address: (input.address || input.location || 'Address pending verification').trim(),
+    contactPerson: input.contactPerson.trim(),
+    email: input.email.trim().toLowerCase(),
+    phone: input.phone.trim(),
+    submittedAt: new Date().toISOString(),
+    status: 'Pending',
+    documents: [
+      { name: 'Hospital Registration Request.pdf', status: 'Uploaded' },
+      { name: 'Hospital License.pdf', status: 'Requested' },
+    ],
+    internalNotes: input.notes ? input.notes.trim() : '',
+    applicantUserId: input.applicantUserId,
+  };
+  db.applications.unshift(appRecord);
+
+  // Update Support & Compliance Agents dynamically
+  const supportAgent = db.agents.find((a) => a.id === 'agent-support');
+  if (supportAgent) {
+    supportAgent.assignedTasks += 1;
+    supportAgent.completedTasks += 1;
+    supportAgent.avgResponseSeconds = 1.4;
+    supportAgent.recentActivity.unshift({
+      id: `agact-${crypto.randomUUID().slice(0, 6)}`,
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      summary: `Logged application ${appRecord.applicationId} for ${appRecord.hospitalName}`,
+      department: 'Onboarding',
+      outcome: 'Awaiting Review',
+    });
+  }
+  const onboardingWf = db.workflows.find((w) => w.id === 'wf-onboarding');
+  if (onboardingWf) {
+    onboardingWf.executionsCount += 1;
+    onboardingWf.lastRunAt = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  appendPlatformActivity(`New hospital application received: ${appRecord.hospitalName}`, 'application');
+  appendNotification(
+    `New onboarding request: ${appRecord.hospitalName}`,
+    `${appRecord.contactPerson} submitted ${appRecord.applicationId} for review.`,
+    'Onboarding',
+    'info'
+  );
+  return appRecord;
+}
+
+function computeSuperAdminOverview() {
+  const totalHospitals = db.applications.length;
+  const pendingApplications = db.applications.filter(
+    (a) => a.status === 'Pending' || a.status === 'Under Review' || a.status === 'Docs Requested'
+  ).length;
+  const approvedHospitals = db.hospitals.length;
+  const activeWorkspaces = db.hospitals.filter((h) => h.workspaceStatus === 'Active').length;
+  const totalUsers = db.users.filter((u) => u.role !== 'admin').length;
+  const activeSubscriptions = db.subscriptions.filter((s) => s.status === 'Active').length;
+
+  const pendingCount = db.applications.filter((a) => a.status === 'Pending' || a.status === 'Docs Requested').length;
+  const underReviewCount = db.applications.filter((a) => a.status === 'Under Review').length;
+  const approvedCount = db.applications.filter((a) => a.status === 'Approved').length;
+
+  // Build 12-month growth series dynamically from real application dates (all 0 when no apps)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const now = new Date();
+  const monthlyGrowth: Array<{ month: string; count: number }> = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const label = monthNames[d.getMonth()];
+    const count = db.applications.filter((app) => {
+      const ad = new Date(app.submittedAt);
+      return ad.getFullYear() === d.getFullYear() && ad.getMonth() === d.getMonth();
+    }).length;
+    monthlyGrowth.push({ month: label, count });
+  }
+
+  return {
+    metrics: {
+      totalHospitals,
+      pendingApplications,
+      approvedHospitals,
+      activeWorkspaces,
+      totalUsers,
+      activeSubscriptions,
+    },
+    applicationOverview: {
+      total: db.applications.length,
+      pending: pendingCount,
+      underReview: underReviewCount,
+      approved: approvedCount,
+    },
+    monthlyGrowth,
+    applications: db.applications,
+    recentHospitals: db.hospitals.slice(0, 6),
+    platformActivity: db.platformActivity.slice(0, 12),
+    agents: db.agents,
+    notifications: db.notifications,
+    systemHealth: {
+      database: 'Healthy' as const,
+      backend: 'Healthy' as const,
+      aiServices: process.env.GEMINI_API_KEY ? ('Active' as const) : ('Standby' as const),
+      integrations: 'Healthy' as const,
+    },
+  };
+}
+
+function computeHospitalOverview(range: string, hospitalName: string) {
   const totalPatients = db.patients.length;
   const today = getTodayDateString();
   const todaysAppointments = db.appointments.filter((a) => a.date === today || range !== 'today').length;
-  const activeAdmissions = db.patients.filter((p) => p.admissionStatus === 'Admitted' || p.admissionStatus === 'ICU Observation').length;
+  const activeAdmissions = db.patients.filter(
+    (p) => p.admissionStatus === 'Admitted' || p.admissionStatus === 'ICU Observation'
+  ).length;
   const bedResources = db.resources.filter((r) => r.category === 'Beds');
   const totalBeds = bedResources.reduce((acc, r) => acc + r.total, 0);
   const availableBeds = bedResources.reduce((acc, r) => acc + r.available, 0);
@@ -867,25 +612,26 @@ function computeOverview(range: string) {
       : 0;
   const totalAgentTasksCompleted = db.agents.reduce((acc, a) => acc + a.completedTasks, 0);
 
-  const multiplier = range === '30d' ? 4 : range === '7d' ? 2 : 1;
-  const appointmentTrends = [
-    { label: '08:00', scheduled: 14 * multiplier, completed: 14 * multiplier, walkIn: 3 * multiplier },
-    { label: '10:00', scheduled: 22 * multiplier, completed: 19 * multiplier, walkIn: 5 * multiplier },
-    { label: '12:00', scheduled: 18 * multiplier, completed: 14 * multiplier, walkIn: 4 * multiplier },
-    { label: '14:00', scheduled: 24 * multiplier, completed: 11 * multiplier, walkIn: 6 * multiplier },
-    { label: '16:00', scheduled: 16 * multiplier, completed: 4 * multiplier, walkIn: 2 * multiplier },
-  ];
+  const slots = ['08:00', '10:00', '12:00', '14:00', '16:00'];
+  const appointmentTrends = slots.map((slot) => {
+    const matching = db.appointments.filter((a) => a.time.startsWith(slot.slice(0, 2)));
+    return {
+      label: slot,
+      scheduled: matching.length,
+      completed: matching.filter((a) => a.status === 'Completed').length,
+      walkIn: 0,
+    };
+  });
 
   const patientFlowStages = [
-    { stage: 'Intake & Check-in', count: db.appointments.filter((a) => a.status === 'Checked In').length + 12, avgMinutes: 6 },
-    { stage: 'Triage & Pre-Consult', count: db.appointments.filter((a) => a.status === 'In Progress').length + 9, avgMinutes: 11 },
-    { stage: 'Active Care / Ward', count: activeAdmissions + 18, avgMinutes: 42 },
-    { stage: 'Discharge Readiness', count: db.patients.filter((p) => p.admissionStatus === 'Discharged').length + 6, avgMinutes: 19 },
+    { stage: 'Intake & Check-in', count: db.appointments.filter((a) => a.status === 'Checked In').length, avgMinutes: 0 },
+    { stage: 'Triage & Pre-Consult', count: db.appointments.filter((a) => a.status === 'In Progress').length, avgMinutes: 0 },
+    { stage: 'Active Care / Ward', count: activeAdmissions, avgMinutes: 0 },
+    { stage: 'Discharge Readiness', count: db.patients.filter((p) => p.admissionStatus === 'Discharged').length, avgMinutes: 0 },
   ];
 
   return {
-    isSampleDataset: true as const,
-    hospitalSettings: db.hospitalSettings,
+    hospitalSettings: { ...db.hospitalSettings, hospitalName: hospitalName || db.hospitalSettings.hospitalName },
     metrics: {
       totalPatients,
       todaysAppointments,
@@ -930,7 +676,7 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
   if (req.authUser.role !== 'admin') {
     appendAudit(req.authUser.email, req.authUser.role, 'ADMIN_ENDPOINT_ACCESS_ATTEMPT', req.path, 'Denied');
     saveDatabase(db);
-    res.status(403).json({ error: 'Administrator privileges are required for this action.' });
+    res.status(403).json({ error: 'Super Administrator privileges are required for this action.' });
     return;
   }
   next();
@@ -941,66 +687,11 @@ async function startServer() {
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
 
-  // Public Auth Status
   app.get('/api/auth/admin-status', (_req, res) => {
-    const envAdmin = getEnvAdminCredentials();
     res.json({
-      adminClaimed: isAdminClaimed(),
-      configuredByEnv: Boolean(envAdmin),
+      adminClaimed: true,
+      configuredByEnv: Boolean(getEnvAdminCredentials()),
     });
-  });
-
-  // One-time Admin Claim (only when ADMIN_PASSWORD env var is unset and no admin exists yet)
-  app.post('/api/auth/claim-admin', async (req, res) => {
-    if (isAdminClaimed()) {
-      res.status(409).json({ error: 'An administrator account has already been configured.' });
-      return;
-    }
-    const { fullName, email, password, hospitalName } = req.body ?? {};
-    const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-    const cleanName = typeof fullName === 'string' ? fullName.trim() : 'CareOS Administrator';
-    const cleanHospital = typeof hospitalName === 'string' && hospitalName.trim() ? hospitalName.trim() : db.hospitalSettings.hospitalName;
-
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      res.status(400).json({ error: 'Please provide a valid administrator email address.' });
-      return;
-    }
-    if (typeof password !== 'string' || password.length < 8) {
-      res.status(400).json({ error: 'Administrator password must be at least 8 characters long.' });
-      return;
-    }
-
-    const passwordHash = await hashPassword(password);
-    const adminUser: StoredUser = {
-      id: `usr-${crypto.randomUUID().slice(0, 8)}`,
-      fullName: cleanName,
-      email: cleanEmail,
-      role: 'admin',
-      hospitalName: cleanHospital,
-      hospitalType: 'Multi-Specialty Hospital',
-      contactNumber: 'Configured',
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      passwordHash,
-    };
-    db.users.push(adminUser);
-    db.hospitalSettings.hospitalName = cleanHospital;
-    appendAudit(cleanEmail, 'admin', 'INITIAL_ADMIN_CLAIMED', 'platform-admin', 'Allowed');
-    saveDatabase(db);
-
-    const token = signToken(
-      {
-        sub: adminUser.id,
-        email: adminUser.email,
-        name: adminUser.fullName,
-        role: adminUser.role,
-        hospitalName: adminUser.hospitalName,
-      },
-      8 * 3600
-    );
-
-    const { passwordHash: _omitted, ...safeUser } = adminUser;
-    res.status(201).json({ token, user: safeUser });
   });
 
   // Login
@@ -1017,7 +708,6 @@ async function startServer() {
     const ttlSeconds = rememberMe ? 7 * 24 * 3600 : 8 * 3600;
     const envAdmin = getEnvAdminCredentials();
 
-    // Environment-configured admin takes precedence
     if (envAdmin && cleanEmail === envAdmin.email) {
       const a = Buffer.from(rawPassword);
       const b = Buffer.from(envAdmin.password);
@@ -1033,9 +723,9 @@ async function startServer() {
         {
           sub: 'env-admin',
           email: envAdmin.email,
-          name: 'Platform Administrator',
+          name: 'Super Admin',
           role: 'admin',
-          hospitalName: db.hospitalSettings.hospitalName,
+          hospitalName: 'CareOS Platform',
         },
         ttlSeconds
       );
@@ -1045,12 +735,12 @@ async function startServer() {
         token,
         user: {
           id: 'env-admin',
-          fullName: 'Platform Administrator',
+          fullName: 'Super Admin',
           email: envAdmin.email,
           role: 'admin',
-          hospitalName: db.hospitalSettings.hospitalName,
-          hospitalType: 'Enterprise Health System',
-          contactNumber: 'Configured',
+          hospitalName: 'CareOS Platform',
+          hospitalType: 'Platform Governance',
+          contactNumber: 'Platform Admin',
           status: 'active',
           createdAt: new Date().toISOString(),
         },
@@ -1074,6 +764,13 @@ async function startServer() {
       return;
     }
 
+    if (user.status === 'suspended') {
+      appendAudit(cleanEmail, user.role, 'LOGIN_SUSPENDED_BLOCKED', 'auth/login', 'Denied');
+      saveDatabase(db);
+      res.status(403).json({ error: 'This workspace is currently suspended. Contact CareOS platform governance.' });
+      return;
+    }
+
     const token = signToken(
       {
         sub: user.id,
@@ -1090,17 +787,29 @@ async function startServer() {
     res.json({ token, user: safeUser });
   });
 
-  // Signup (Regular users strictly receive 'coordinator' role, never 'admin')
+  // Signup: creates coordinator user ('pending' onboarding) + real Hospital Application for Super Admin review!
   app.post('/api/auth/signup', async (req, res) => {
-    const { fullName, workEmail, password, hospitalName, hospitalType, contactNumber, agreedToTerms } = req.body ?? {};
+    const {
+      fullName,
+      workEmail,
+      password,
+      hospitalName,
+      hospitalType,
+      location,
+      address,
+      bedsCount,
+      departmentsCount,
+      contactNumber,
+      agreedToTerms,
+    } = req.body ?? {};
     const cleanEmail = typeof workEmail === 'string' ? workEmail.trim().toLowerCase() : '';
     const cleanName = typeof fullName === 'string' ? fullName.trim() : '';
     const cleanHospital = typeof hospitalName === 'string' ? hospitalName.trim() : '';
-    const cleanType = typeof hospitalType === 'string' ? hospitalType.trim() : '';
+    const cleanType = typeof hospitalType === 'string' ? hospitalType.trim() : 'Multi-Specialty';
     const cleanPhone = typeof contactNumber === 'string' ? contactNumber.trim() : '';
 
-    if (!cleanName || !cleanEmail || !cleanHospital || !cleanType || !cleanPhone) {
-      res.status(400).json({ error: 'All organization and contact fields are required.' });
+    if (!cleanName || !cleanEmail || !cleanHospital || !cleanPhone) {
+      res.status(400).json({ error: 'Full name, work email, hospital name, and contact number are required.' });
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -1122,20 +831,37 @@ async function startServer() {
     }
 
     const passwordHash = await hashPassword(password);
+    const userId = `usr-${crypto.randomUUID().slice(0, 8)}`;
+
+    const appRecord = createHospitalApplicationRecord({
+      hospitalName: cleanHospital,
+      hospitalType: cleanType,
+      bedsCount: Number(bedsCount) || 120,
+      departmentsCount: Number(departmentsCount) || 10,
+      location: typeof location === 'string' && location.trim() ? location : 'Pending Location',
+      address: typeof address === 'string' && address.trim() ? address : 'Submitted via CareOS Signup',
+      contactPerson: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      applicantUserId: userId,
+    });
+
     const newUser: StoredUser = {
-      id: `usr-${crypto.randomUUID().slice(0, 8)}`,
+      id: userId,
       fullName: cleanName,
       email: cleanEmail,
       role: 'coordinator', // Regular signups never receive admin privileges
       hospitalName: cleanHospital,
       hospitalType: cleanType,
+      applicationId: appRecord.applicationId,
       contactNumber: cleanPhone,
-      status: 'active',
+      status: 'pending',
       createdAt: new Date().toISOString(),
       passwordHash,
     };
     db.users.push(newUser);
-    appendAudit(cleanEmail, 'coordinator', 'ORGANIZATION_ACCOUNT_CREATED', cleanHospital, 'Allowed');
+    appendPlatformActivity(`New user registered: ${cleanName}`, 'user');
+    appendAudit(cleanEmail, 'coordinator', 'HOSPITAL_ONBOARDING_REQUESTED', appRecord.applicationId, 'Allowed');
     saveDatabase(db);
 
     const token = signToken(
@@ -1149,7 +875,7 @@ async function startServer() {
       8 * 3600
     );
     const { passwordHash: _omitted, ...safeUser } = newUser;
-    res.status(201).json({ token, user: safeUser });
+    res.status(201).json({ token, user: safeUser, application: appRecord });
   });
 
   app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -1163,7 +889,7 @@ async function startServer() {
 
   app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res) => {
     const u = req.authUser!;
-    const dbUser = db.users.find((item) => item.id === u.sub);
+    const dbUser = db.users.find((item) => item.id === u.sub || item.email === u.email);
     if (dbUser) {
       const { passwordHash: _omitted, ...safeUser } = dbUser;
       res.json({ user: safeUser });
@@ -1176,8 +902,8 @@ async function startServer() {
         email: u.email,
         role: u.role,
         hospitalName: u.hospitalName,
-        hospitalType: 'Enterprise Health System',
-        contactNumber: 'Configured',
+        hospitalType: 'Platform Governance',
+        contactNumber: 'Platform Admin',
         status: 'active',
         createdAt: new Date(u.iat * 1000).toISOString(),
       },
@@ -1192,13 +918,13 @@ async function startServer() {
       return;
     }
     res.json({
-      message: 'If an active CareOS account matches that address, password recovery instructions have been queued for your hospital IT administrator.',
+      message: 'If an active CareOS account matches that address, password recovery instructions have been queued for platform governance.',
     });
   });
 
-  // Public contact & demo forms
+  // Public Demo / Onboarding Request -> Directly creates a real Hospital Application in Admin Dashboard!
   app.post('/api/public/contact', (req, res) => {
-    const { type, name, email, organization, roleOrType, message } = req.body ?? {};
+    const { name, email, organization, roleOrType, location, bedsCount, departmentsCount, phone, message } = req.body ?? {};
     if (!name || !email || !organization || !message) {
       res.status(400).json({ error: 'Please complete all required fields.' });
       return;
@@ -1207,29 +933,364 @@ async function startServer() {
       res.status(400).json({ error: 'Please enter a valid email address.' });
       return;
     }
-    const record: InquiryRecord = {
-      id: `inq-${crypto.randomUUID().slice(0, 8)}`,
-      type: type === 'demo' ? 'demo' : 'contact',
-      name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
-      organization: String(organization).trim(),
-      roleOrType: String(roleOrType || 'Hospital Leadership').trim(),
-      message: String(message).trim(),
-      createdAt: new Date().toISOString(),
-    };
-    db.inquiries.unshift(record);
+
+    const appRecord = createHospitalApplicationRecord({
+      hospitalName: String(organization),
+      hospitalType: String(roleOrType || 'Multi-Specialty'),
+      bedsCount: Number(bedsCount) || 150,
+      departmentsCount: Number(departmentsCount) || 12,
+      location: String(location || 'Location pending'),
+      contactPerson: String(name),
+      email: String(email),
+      phone: String(phone || 'Not provided'),
+      notes: String(message),
+    });
+
+    appendAudit(String(email).trim().toLowerCase(), 'public', 'ONBOARDING_DEMO_SUBMITTED', appRecord.applicationId, 'Allowed');
     saveDatabase(db);
-    res.status(201).json({ ok: true, inquiryId: record.id });
+    res.status(201).json({ ok: true, inquiryId: appRecord.applicationId, application: appRecord });
   });
 
-  // Protected Dashboard Routes
-  app.get('/api/dashboard/overview', requireAuth, (req, res) => {
+  // Applicant Onboarding Tracker (for signed-in hospital users awaiting approval)
+  app.get('/api/applicant/status', requireAuth, (req: AuthenticatedRequest, res) => {
+    const u = db.users.find((item) => item.id === req.authUser!.sub || item.email === req.authUser!.email);
+    const appRecord = db.applications.find(
+      (a) => a.applicantUserId === req.authUser!.sub || a.email === req.authUser!.email
+    );
+    const hospital = db.hospitals.find(
+      (h) => h.hospitalId === u?.hospitalId || h.administratorEmail === req.authUser!.email
+    );
+    res.json({
+      userStatus: u?.status || 'pending',
+      application: appRecord || null,
+      hospital: hospital || null,
+    });
+  });
+
+  app.post('/api/applicant/resubmit', requireAuth, (req: AuthenticatedRequest, res) => {
+    const appRecord = db.applications.find(
+      (a) => a.applicantUserId === req.authUser!.sub || a.email === req.authUser!.email
+    );
+    if (!appRecord) {
+      res.status(404).json({ error: 'No onboarding application found for your account.' });
+      return;
+    }
+    const { documentName, note } = req.body ?? {};
+    if (documentName && String(documentName).trim()) {
+      appRecord.documents.push({ name: String(documentName).trim(), status: 'Uploaded' });
+    }
+    if (note && String(note).trim()) {
+      appRecord.internalNotes = `${appRecord.internalNotes ? appRecord.internalNotes + '\n' : ''}Applicant response: ${String(note).trim()}`;
+    }
+    appRecord.status = 'Under Review';
+    appendPlatformActivity(`Updated documents submitted for ${appRecord.hospitalName}`, 'application');
+    appendNotification(
+      `Documents submitted: ${appRecord.hospitalName}`,
+      `${appRecord.contactPerson} responded to your document request.`,
+      'Onboarding',
+      'info'
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'APPLICANT_DOCS_SUBMITTED', appRecord.applicationId, 'Allowed');
+    saveDatabase(db);
+    res.json({ application: appRecord });
+  });
+
+  // ==========================================================
+  // SUPER ADMIN PLATFORM COMMAND CENTER ENDPOINTS
+  // ==========================================================
+  app.get('/api/super-admin/overview', requireAuth, requireAdmin, (_req, res) => {
+    res.json(computeSuperAdminOverview());
+  });
+
+  app.get('/api/super-admin/applications', requireAuth, requireAdmin, (_req, res) => {
+    res.json({ applications: db.applications });
+  });
+
+  app.get('/api/super-admin/applications/:id', requireAuth, requireAdmin, (req, res) => {
+    const appRecord = db.applications.find((a) => a.id === req.params.id || a.applicationId === req.params.id);
+    if (!appRecord) {
+      res.status(404).json({ error: 'Application not found.' });
+      return;
+    }
+    res.json({ application: appRecord });
+  });
+
+  app.patch('/api/super-admin/applications/:id', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    const appRecord = db.applications.find((a) => a.id === req.params.id || a.applicationId === req.params.id);
+    if (!appRecord) {
+      res.status(404).json({ error: 'Application not found.' });
+      return;
+    }
+    const { status, internalNotes, requestedMessage } = req.body ?? {};
+    if (typeof internalNotes === 'string') {
+      appRecord.internalNotes = internalNotes;
+    }
+    if (typeof requestedMessage === 'string') {
+      appRecord.requestedMessage = requestedMessage;
+    }
+    if (status && ['Pending', 'Under Review', 'Docs Requested', 'Rejected'].includes(status)) {
+      appRecord.status = status as ApplicationStatus;
+      appRecord.reviewedAt = new Date().toISOString();
+      if (status === 'Docs Requested') {
+        appRecord.documents.push({ name: 'Additional Verification Required', status: 'Requested' });
+        appendPlatformActivity(`Documents requested: ${appRecord.hospitalName}`, 'application');
+      } else if (status === 'Rejected') {
+        appendPlatformActivity(`Application rejected: ${appRecord.hospitalName}`, 'application');
+      } else if (status === 'Under Review') {
+        appendPlatformActivity(`Application under review: ${appRecord.hospitalName}`, 'application');
+      }
+      appendAudit(req.authUser!.email, 'admin', `APPLICATION_${String(status).toUpperCase().replace(/\s+/g, '_')}`, appRecord.applicationId, 'Allowed');
+    } else {
+      appendAudit(req.authUser!.email, 'admin', 'APPLICATION_NOTES_SAVED', appRecord.applicationId, 'Allowed');
+    }
+    saveDatabase(db);
+    res.json({ application: appRecord });
+  });
+
+  app.post('/api/super-admin/applications/:id/approve', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    const appRecord = db.applications.find((a) => a.id === req.params.id || a.applicationId === req.params.id);
+    if (!appRecord) {
+      res.status(404).json({ error: 'Application not found.' });
+      return;
+    }
+    if (appRecord.status === 'Approved') {
+      res.status(400).json({ error: 'Hospital is already approved.' });
+      return;
+    }
+
+    const plan: SubscriptionPlan =
+      req.body?.plan === 'Starter' || req.body?.plan === 'Pro' || req.body?.plan === 'Enterprise'
+        ? req.body.plan
+        : appRecord.bedsCount >= 200
+        ? 'Enterprise'
+        : appRecord.bedsCount >= 80
+        ? 'Pro'
+        : 'Starter';
+
+    appRecord.status = 'Approved';
+    appRecord.reviewedAt = new Date().toISOString();
+    appRecord.documents = appRecord.documents.map((d) => ({ ...d, status: 'Verified' }));
+
+    const hspSeq = String(1 + db.hospitals.length).padStart(5, '0');
+    const hospitalId = `HSP-${hspSeq}`;
+
+    // Activate any linked applicant user
+    const linkedUsers = db.users.filter(
+      (u) => u.id === appRecord.applicantUserId || u.email.toLowerCase() === appRecord.email.toLowerCase()
+    );
+    linkedUsers.forEach((u) => {
+      u.status = 'active';
+      u.hospitalId = hospitalId;
+    });
+
+    const approvedHospital: ApprovedHospital = {
+      id: `hsp-${crypto.randomUUID().slice(0, 8)}`,
+      hospitalId,
+      applicationId: appRecord.applicationId,
+      hospitalName: appRecord.hospitalName,
+      hospitalType: appRecord.hospitalType,
+      location: appRecord.location,
+      address: appRecord.address,
+      administratorName: appRecord.contactPerson,
+      administratorEmail: appRecord.email,
+      phone: appRecord.phone,
+      bedsCount: appRecord.bedsCount,
+      departmentsCount: appRecord.departmentsCount,
+      activeUsersCount: Math.max(linkedUsers.length, 1),
+      subscriptionPlan: plan,
+      workspaceStatus: 'Active',
+      approvedAt: new Date().toISOString(),
+    };
+    db.hospitals.unshift(approvedHospital);
+
+    const { monthlyPriceUsd, seatsIncluded } = planDetails(plan);
+    const sub: SubscriptionRecord = {
+      id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+      hospitalId,
+      hospitalName: appRecord.hospitalName,
+      plan,
+      monthlyPriceUsd,
+      seatsIncluded,
+      status: 'Active',
+      startedAt: new Date().toISOString(),
+    };
+    db.subscriptions.unshift(sub);
+
+    // Provision default departments & beds for the hospital ecosystem if empty
+    if (db.departments.length === 0) {
+      db.departments = [
+        { id: 'dept-cardio', name: 'Cardiology', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.2)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+        { id: 'dept-er', name: 'Emergency', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.15)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+        { id: 'dept-gen', name: 'General Medicine', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(20, Math.round(appRecord.bedsCount * 0.4)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+      ];
+    }
+
+    const complianceAgent = db.agents.find((a) => a.id === 'agent-compliance');
+    if (complianceAgent) {
+      complianceAgent.assignedTasks += 1;
+      complianceAgent.completedTasks += 1;
+      complianceAgent.avgResponseSeconds = 1.2;
+      complianceAgent.recentActivity.unshift({
+        id: `agact-${crypto.randomUUID().slice(0, 6)}`,
+        timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        summary: `Approved ${appRecord.hospitalName} (${hospitalId}) on ${plan} plan`,
+        department: 'Governance',
+        outcome: 'Completed',
+      });
+    }
+
+    appendPlatformActivity(`Hospital approved: ${appRecord.hospitalName}`, 'approval');
+    appendNotification(
+      `Hospital approved: ${appRecord.hospitalName}`,
+      `${hospitalId} workspace provisioned on ${plan} plan.`,
+      'Governance',
+      'info'
+    );
+    appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_APPROVED', `${hospitalId} (${appRecord.hospitalName})`, 'Allowed');
+    saveDatabase(db);
+
+    res.json({ application: appRecord, hospital: approvedHospital, subscription: sub });
+  });
+
+  // Direct Admin Onboarding of a Hospital
+  app.post('/api/super-admin/hospitals/manual', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    const { hospitalName, hospitalType, location, address, contactPerson, email, phone, bedsCount, departmentsCount, plan } = req.body ?? {};
+    if (!hospitalName || !contactPerson || !email) {
+      res.status(400).json({ error: 'Hospital name, administrator name, and email are required.' });
+      return;
+    }
+    const appRecord = createHospitalApplicationRecord({
+      hospitalName: String(hospitalName),
+      hospitalType: String(hospitalType || 'Multi-Specialty'),
+      bedsCount: Number(bedsCount) || 150,
+      departmentsCount: Number(departmentsCount) || 10,
+      location: String(location || 'United States'),
+      address: String(address || 'Configured by Super Admin'),
+      contactPerson: String(contactPerson),
+      email: String(email),
+      phone: String(phone || 'Not provided'),
+    });
+    // Immediately approve if requested
+    if (req.body?.autoApprove) {
+      appRecord.status = 'Approved';
+      appRecord.reviewedAt = new Date().toISOString();
+      const chosenPlan: SubscriptionPlan = plan === 'Starter' || plan === 'Pro' ? plan : 'Enterprise';
+      const hospitalId = `HSP-${String(1 + db.hospitals.length).padStart(5, '0')}`;
+      const hsp: ApprovedHospital = {
+        id: `hsp-${crypto.randomUUID().slice(0, 8)}`,
+        hospitalId,
+        applicationId: appRecord.applicationId,
+        hospitalName: appRecord.hospitalName,
+        hospitalType: appRecord.hospitalType,
+        location: appRecord.location,
+        address: appRecord.address,
+        administratorName: appRecord.contactPerson,
+        administratorEmail: appRecord.email,
+        phone: appRecord.phone,
+        bedsCount: appRecord.bedsCount,
+        departmentsCount: appRecord.departmentsCount,
+        activeUsersCount: 1,
+        subscriptionPlan: chosenPlan,
+        workspaceStatus: 'Active',
+        approvedAt: new Date().toISOString(),
+      };
+      db.hospitals.unshift(hsp);
+      const { monthlyPriceUsd, seatsIncluded } = planDetails(chosenPlan);
+      db.subscriptions.unshift({
+        id: `sub-${crypto.randomUUID().slice(0, 8)}`,
+        hospitalId,
+        hospitalName: appRecord.hospitalName,
+        plan: chosenPlan,
+        monthlyPriceUsd,
+        seatsIncluded,
+        status: 'Active',
+        startedAt: new Date().toISOString(),
+      });
+      appendPlatformActivity(`Hospital onboarded directly: ${hsp.hospitalName}`, 'approval');
+      appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_DIRECT_ONBOARD', hospitalId, 'Allowed');
+      saveDatabase(db);
+      res.status(201).json({ application: appRecord, hospital: hsp });
+      return;
+    }
+    appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_APPLICATION_CREATED', appRecord.applicationId, 'Allowed');
+    saveDatabase(db);
+    res.status(201).json({ application: appRecord });
+  });
+
+  app.get('/api/super-admin/hospitals', requireAuth, requireAdmin, (_req, res) => {
+    res.json({ hospitals: db.hospitals });
+  });
+
+  app.patch('/api/super-admin/hospitals/:id', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    const hsp = db.hospitals.find((h) => h.id === req.params.id || h.hospitalId === req.params.id);
+    if (!hsp) {
+      res.status(404).json({ error: 'Hospital not found.' });
+      return;
+    }
+    const { subscriptionPlan, workspaceStatus } = req.body ?? {};
+    if (subscriptionPlan && ['Starter', 'Pro', 'Enterprise'].includes(subscriptionPlan)) {
+      hsp.subscriptionPlan = subscriptionPlan as SubscriptionPlan;
+      const sub = db.subscriptions.find((s) => s.hospitalId === hsp.hospitalId);
+      if (sub) {
+        sub.plan = hsp.subscriptionPlan;
+        const details = planDetails(hsp.subscriptionPlan);
+        sub.monthlyPriceUsd = details.monthlyPriceUsd;
+        sub.seatsIncluded = details.seatsIncluded;
+      }
+      appendPlatformActivity(`Subscription updated for ${hsp.hospitalName} (${hsp.subscriptionPlan})`, 'system');
+    }
+    if (workspaceStatus && ['Active', 'Suspended'].includes(workspaceStatus)) {
+      hsp.workspaceStatus = workspaceStatus;
+      const sub = db.subscriptions.find((s) => s.hospitalId === hsp.hospitalId);
+      if (sub) sub.status = workspaceStatus === 'Active' ? 'Active' : 'Paused';
+      db.users.forEach((u) => {
+        if (u.hospitalId === hsp.hospitalId && u.role !== 'admin') {
+          u.status = workspaceStatus === 'Active' ? 'active' : 'suspended';
+        }
+      });
+      appendPlatformActivity(`Workspace ${workspaceStatus.toLowerCase()}: ${hsp.hospitalName}`, 'system');
+    }
+    appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_UPDATED', hsp.hospitalId, 'Allowed');
+    saveDatabase(db);
+    res.json({ hospital: hsp });
+  });
+
+  app.get('/api/super-admin/subscriptions', requireAuth, requireAdmin, (_req, res) => {
+    res.json({ subscriptions: db.subscriptions });
+  });
+
+  app.post('/api/super-admin/change-password', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+      return;
+    }
+    const adminUser = db.users.find((u) => u.email.toLowerCase() === req.authUser!.email.toLowerCase() && u.role === 'admin');
+    if (!adminUser) {
+      res.status(400).json({ error: 'Environment-managed admin passwords must be updated in Settings -> Secrets.' });
+      return;
+    }
+    const ok = await verifyPassword(String(currentPassword || ''), adminUser.passwordHash);
+    if (!ok) {
+      res.status(401).json({ error: 'Current password is incorrect.' });
+      return;
+    }
+    adminUser.passwordHash = await hashPassword(newPassword);
+    appendAudit(adminUser.email, 'admin', 'ADMIN_PASSWORD_ROTATED', 'auth/admin', 'Allowed');
+    saveDatabase(db);
+    res.json({ ok: true });
+  });
+
+  // ==========================================================
+  // HOSPITAL WORKSPACE & SHARED OPERATIONS ENDPOINTS
+  // ==========================================================
+  app.get('/api/dashboard/overview', requireAuth, (req: AuthenticatedRequest, res) => {
     const range = typeof req.query.range === 'string' ? req.query.range : 'today';
-    res.json(computeOverview(range));
+    res.json(computeHospitalOverview(range, req.authUser!.hospitalName));
   });
 
   app.get('/api/patients', requireAuth, (_req, res) => {
-    res.json({ patients: db.patients, isSampleDataset: true });
+    res.json({ patients: db.patients });
   });
 
   app.post('/api/patients', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -1240,23 +1301,22 @@ async function startServer() {
     }
     const newPatient: PatientRecord = {
       id: `pat-${crypto.randomUUID().slice(0, 6)}`,
-      mrn: `MRN-${Math.floor(41000 + Math.random() * 8999)}`,
+      mrn: `MRN-${10001 + db.patients.length}`,
       fullName: String(fullName).trim(),
       age: Number(age) || 40,
       gender: gender === 'Female' || gender === 'Male' ? gender : 'Other',
-      phone: String(phone || '+1 (415) 555-0100').trim(),
-      email: String(email || 'patient@sample-patient.org').trim(),
+      phone: String(phone || 'Not provided').trim(),
+      email: String(email || 'Not provided').trim(),
       department: String(department).trim(),
       attendingDoctor: String(attendingDoctor).trim(),
       admissionStatus: admissionStatus || 'Outpatient',
       wardBed: String(wardBed || `${String(department).slice(0, 5)}-Clinic`).trim(),
       lastVisit: getTodayDateString(),
-      medicalSummary: String(medicalSummary || 'Registered in CareOS sample patient registry.').trim(),
+      medicalSummary: String(medicalSummary || 'Registered in CareOS workspace.').trim(),
       allergies: Array.isArray(allergies) ? allergies : ['None reported'],
-      isSample: true,
     };
     db.patients.unshift(newPatient);
-    appendAudit(req.authUser!.email, req.authUser!.role, 'PATIENT_REGISTERED_SAMPLE', newPatient.mrn, 'Allowed');
+    appendAudit(req.authUser!.email, req.authUser!.role, 'PATIENT_REGISTERED', newPatient.mrn, 'Allowed');
     saveDatabase(db);
     res.status(201).json({ patient: newPatient });
   });
@@ -1271,13 +1331,13 @@ async function startServer() {
     if (admissionStatus) db.patients[idx].admissionStatus = admissionStatus;
     if (wardBed) db.patients[idx].wardBed = String(wardBed);
     if (medicalSummary) db.patients[idx].medicalSummary = String(medicalSummary);
-    appendAudit(req.authUser!.email, req.authUser!.role, 'PATIENT_RECORD_UPDATED', db.patients[idx].mrn, 'Allowed');
+    appendAudit(req.authUser!.email, req.authUser!.role, 'PATIENT_UPDATED', db.patients[idx].mrn, 'Allowed');
     saveDatabase(db);
     res.json({ patient: db.patients[idx] });
   });
 
   app.get('/api/appointments', requireAuth, (_req, res) => {
-    res.json({ appointments: db.appointments, isSampleDataset: true });
+    res.json({ appointments: db.appointments });
   });
 
   app.post('/api/appointments', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -1290,7 +1350,7 @@ async function startServer() {
       id: `apt-${crypto.randomUUID().slice(0, 6)}`,
       patientId: String(patientId || 'pat-new'),
       patientName: String(patientName).trim(),
-      mrn: String(mrn || 'MRN-SAMPLE').trim(),
+      mrn: String(mrn || 'MRN-NEW').trim(),
       doctorName: String(doctorName).trim(),
       department: String(department).trim(),
       date: String(date).trim(),
@@ -1298,7 +1358,6 @@ async function startServer() {
       type: type || 'Consultation',
       status: 'Scheduled',
       notes: String(notes || '').trim(),
-      isSample: true,
     };
     db.appointments.unshift(newApt);
     appendAudit(req.authUser!.email, req.authUser!.role, 'APPOINTMENT_BOOKED', newApt.id, 'Allowed');
@@ -1326,6 +1385,21 @@ async function startServer() {
     res.json({ agents: db.agents });
   });
 
+  app.patch('/api/agents/:id/status', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    const agent = db.agents.find((a) => a.id === req.params.id);
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found.' });
+      return;
+    }
+    const nextStatus = req.body?.status;
+    if (nextStatus === 'Active' || nextStatus === 'Monitoring' || nextStatus === 'Paused') {
+      agent.status = nextStatus;
+      appendAudit(req.authUser!.email, 'admin', `AGENT_STATUS_${nextStatus.toUpperCase()}`, agent.name, 'Allowed');
+      saveDatabase(db);
+    }
+    res.json({ agent });
+  });
+
   app.post('/api/agents/:id/dispatch', requireAuth, (req: AuthenticatedRequest, res) => {
     const agent = db.agents.find((a) => a.id === req.params.id);
     if (!agent) {
@@ -1333,13 +1407,15 @@ async function startServer() {
       return;
     }
     const { taskSummary, department } = req.body ?? {};
-    const summary = typeof taskSummary === 'string' && taskSummary.trim()
-      ? taskSummary.trim()
-      : `Executed coordinated operational check across ${department || 'Hospital Operations'}`;
+    const summary =
+      typeof taskSummary === 'string' && taskSummary.trim()
+        ? taskSummary.trim()
+        : `Executed coordinated check across ${department || 'Platform Operations'}`;
     const dept = typeof department === 'string' && department.trim() ? department.trim() : 'Operations';
 
     agent.assignedTasks += 1;
     agent.completedTasks += 1;
+    agent.avgResponseSeconds = 1.6;
     const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     agent.recentActivity.unshift({
       id: `act-${crypto.randomUUID().slice(0, 6)}`,
@@ -1348,19 +1424,10 @@ async function startServer() {
       department: dept,
       outcome: agent.id === 'agent-clinical' ? 'Awaiting Review' : 'Completed',
     });
-    if (agent.recentActivity.length > 8) agent.recentActivity = agent.recentActivity.slice(0, 8);
+    if (agent.recentActivity.length > 10) agent.recentActivity = agent.recentActivity.slice(0, 10);
 
-    db.notifications.unshift({
-      id: `not-${crypto.randomUUID().slice(0, 6)}`,
-      title: `${agent.name} completed task`,
-      detail: summary,
-      department: dept,
-      severity: 'info',
-      timestamp: 'Just now',
-      read: false,
-    });
-    if (db.notifications.length > 15) db.notifications = db.notifications.slice(0, 15);
-
+    appendNotification(`${agent.name} completed task`, summary, dept, 'info');
+    appendPlatformActivity(`${agent.name} dispatched: ${summary}`, 'system');
     appendAudit(req.authUser!.email, req.authUser!.role, 'AGENT_TASK_DISPATCHED', `${agent.id} (${dept})`, 'Allowed');
     saveDatabase(db);
     res.json({ agent });
@@ -1465,7 +1532,7 @@ async function startServer() {
       return;
     }
     if (item.availability === 'planned') {
-      res.status(400).json({ error: `${item.name} is a planned ecosystem connector and cannot be activated in this environment yet.` });
+      res.status(400).json({ error: `${item.name} is a planned ecosystem connector and cannot be activated yet.` });
       return;
     }
     item.connected = Boolean(req.body?.connected);
@@ -1475,34 +1542,35 @@ async function startServer() {
   });
 
   app.get('/api/analytics', requireAuth, (_req, res) => {
-    const overview = computeOverview('7d');
-    const deptBreakdown = db.departments.map((d) => ({
-      name: d.name,
-      activePatients: d.activePatients,
-      bedUtilization: d.bedCapacity > 0 ? Math.round((d.occupiedBeds / d.bedCapacity) * 100) : 0,
-      avgWaitMinutes: d.avgWaitMinutes,
-      staffUtilization: d.totalStaff > 0 ? Math.round((d.staffOnDuty / d.totalStaff) * 100) : 0,
-    }));
-    const agentPerformance = db.agents.map((a) => ({
-      id: a.id,
-      name: a.shortName,
-      completed: a.completedTasks,
-      pending: a.pendingTasks,
-      completionRate: a.assignedTasks > 0 ? Math.round((a.completedTasks / a.assignedTasks) * 100) : 100,
-      avgResponseSeconds: a.avgResponseSeconds,
-    }));
+    const sa = computeSuperAdminOverview();
+    const totalBedsProvisioned = db.hospitals.reduce((sum, h) => sum + h.bedsCount, 0);
+    const totalDeptsProvisioned = db.hospitals.reduce((sum, h) => sum + h.departmentsCount, 0);
+    const mrrUsd = db.subscriptions.filter((s) => s.status === 'Active').reduce((sum, s) => sum + s.monthlyPriceUsd, 0);
+
     res.json({
-      isSampleDataset: true,
-      summary: overview.metrics,
-      deptBreakdown,
-      agentPerformance,
-      appointmentTrends: overview.appointmentTrends,
+      metrics: sa.metrics,
+      totalBedsProvisioned,
+      totalDeptsProvisioned,
+      mrrUsd,
+      monthlyGrowth: sa.monthlyGrowth,
+      applicationOverview: sa.applicationOverview,
+      hospitals: db.hospitals,
+      agentPerformance: db.agents.map((a) => ({
+        id: a.id,
+        name: a.shortName,
+        completed: a.completedTasks,
+        pending: a.pendingTasks,
+        completionRate: a.assignedTasks > 0 ? Math.round((a.completedTasks / a.assignedTasks) * 100) : 0,
+        avgResponseSeconds: a.avgResponseSeconds,
+      })),
     });
   });
 
-  // Administrator-only endpoints
+  // Administrator-only Users, Audit Logs, Settings
   app.get('/api/admin/users', requireAuth, requireAdmin, (_req, res) => {
-    const safeUsers = db.users.map(({ passwordHash: _omitted, ...u }) => u);
+    const safeUsers = db.users
+      .filter((u) => u.role !== 'admin')
+      .map(({ passwordHash: _omitted, ...u }) => u);
     res.json({ users: safeUsers });
   });
 
@@ -1512,13 +1580,15 @@ async function startServer() {
       res.status(404).json({ error: 'User not found.' });
       return;
     }
-    const nextRole = req.body?.role as UserRole;
-    if (!['admin', 'coordinator', 'clinician', 'operator'].includes(nextRole)) {
-      res.status(400).json({ error: 'Invalid role specified.' });
-      return;
+    const { role, status } = req.body ?? {};
+    if (role && ['admin', 'coordinator', 'clinician', 'operator'].includes(role)) {
+      target.role = role as UserRole;
+      appendAudit(req.authUser!.email, 'admin', `USER_ROLE_CHANGED_TO_${String(role).toUpperCase()}`, target.email, 'Allowed');
     }
-    target.role = nextRole;
-    appendAudit(req.authUser!.email, req.authUser!.role, `USER_ROLE_CHANGED_TO_${nextRole.toUpperCase()}`, target.email, 'Allowed');
+    if (status && ['active', 'pending', 'suspended'].includes(status)) {
+      target.status = status;
+      appendAudit(req.authUser!.email, 'admin', `USER_STATUS_CHANGED_TO_${String(status).toUpperCase()}`, target.email, 'Allowed');
+    }
     saveDatabase(db);
     const { passwordHash: _omitted, ...safeUser } = target;
     res.json({ user: safeUser });
@@ -1542,12 +1612,11 @@ async function startServer() {
     if (typeof sessionTimeoutMinutes === 'number' && sessionTimeoutMinutes >= 15) {
       db.hospitalSettings.sessionTimeoutMinutes = sessionTimeoutMinutes;
     }
-    appendAudit(req.authUser!.email, req.authUser!.role, 'HOSPITAL_SETTINGS_UPDATED', 'system-settings', 'Allowed');
+    appendAudit(req.authUser!.email, 'admin', 'PLATFORM_SETTINGS_UPDATED', 'system-settings', 'Allowed');
     saveDatabase(db);
     res.json({ hospitalSettings: db.hospitalSettings });
   });
 
-  // Vite dev middleware or production static assets
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

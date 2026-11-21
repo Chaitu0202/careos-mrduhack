@@ -12,6 +12,9 @@ interface SignupPayload {
   password: string;
   hospitalName: string;
   hospitalType: string;
+  location?: string;
+  bedsCount?: number;
+  departmentsCount?: number;
   contactNumber: string;
   agreedToTerms: boolean;
 }
@@ -29,6 +32,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   adminStatus: AdminStatus;
   refreshAdminStatus: () => Promise<void>;
+  refreshMe: () => Promise<AuthUser | null>;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<AuthUser>;
   signup: (payload: SignupPayload) => Promise<AuthUser>;
   claimAdmin: (payload: ClaimAdminPayload) => Promise<AuthUser>;
@@ -85,6 +89,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     [token]
   );
+
+  const refreshMe = useCallback(async (): Promise<AuthUser | null> => {
+    if (!token) return null;
+    try {
+      const data = await apiFetch<{ user: AuthUser }>('/api/auth/me');
+      setUser(data.user);
+      return data.user;
+    } catch {
+      return null;
+    }
+  }, [apiFetch, token]);
 
   const login = useCallback(async (email: string, password: string, rememberMe = false): Promise<AuthUser> => {
     const res = await fetch('/api/auth/login', {
@@ -157,6 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: Boolean(token && user),
         adminStatus,
         refreshAdminStatus,
+        refreshMe,
         login,
         signup,
         claimAdmin,

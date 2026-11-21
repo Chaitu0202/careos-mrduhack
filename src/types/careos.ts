@@ -7,9 +7,78 @@ export interface AuthUser {
   role: UserRole;
   hospitalName: string;
   hospitalType: string;
+  hospitalId?: string;
+  applicationId?: string;
   contactNumber: string;
-  status: 'active' | 'pending';
+  status: 'active' | 'pending' | 'suspended';
   createdAt: string;
+}
+
+export type ApplicationStatus = 'Pending' | 'Under Review' | 'Docs Requested' | 'Approved' | 'Rejected';
+
+export interface ApplicationDocument {
+  name: string;
+  status: 'Uploaded' | 'Requested' | 'Verified';
+}
+
+export interface HospitalApplication {
+  id: string;
+  applicationId: string;
+  hospitalName: string;
+  hospitalType: string;
+  bedsCount: number;
+  departmentsCount: number;
+  location: string;
+  address: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  submittedAt: string;
+  status: ApplicationStatus;
+  documents: ApplicationDocument[];
+  internalNotes: string;
+  requestedMessage?: string;
+  applicantUserId?: string;
+  reviewedAt?: string;
+}
+
+export type SubscriptionPlan = 'Starter' | 'Pro' | 'Enterprise';
+
+export interface ApprovedHospital {
+  id: string;
+  hospitalId: string;
+  applicationId: string;
+  hospitalName: string;
+  hospitalType: string;
+  location: string;
+  address: string;
+  administratorName: string;
+  administratorEmail: string;
+  phone: string;
+  bedsCount: number;
+  departmentsCount: number;
+  activeUsersCount: number;
+  subscriptionPlan: SubscriptionPlan;
+  workspaceStatus: 'Active' | 'Suspended';
+  approvedAt: string;
+}
+
+export interface SubscriptionRecord {
+  id: string;
+  hospitalId: string;
+  hospitalName: string;
+  plan: SubscriptionPlan;
+  monthlyPriceUsd: number;
+  seatsIncluded: number;
+  status: 'Active' | 'Paused';
+  startedAt: string;
+}
+
+export interface PlatformActivityItem {
+  id: string;
+  message: string;
+  category: 'application' | 'approval' | 'user' | 'system';
+  timestamp: string;
 }
 
 export interface PatientRecord {
@@ -27,7 +96,6 @@ export interface PatientRecord {
   lastVisit: string;
   medicalSummary: string;
   allergies: string[];
-  isSample: true;
 }
 
 export interface AppointmentRecord {
@@ -42,7 +110,6 @@ export interface AppointmentRecord {
   type: 'Consultation' | 'Follow-up' | 'Diagnostic' | 'Procedure' | 'Telehealth';
   status: 'Scheduled' | 'Checked In' | 'In Progress' | 'Completed' | 'Rescheduled' | 'Cancelled';
   notes: string;
-  isSample: true;
 }
 
 export interface DepartmentRecord {
@@ -164,8 +231,36 @@ export interface StaffMember {
   activeCases: number;
 }
 
+export interface SuperAdminOverviewData {
+  metrics: {
+    totalHospitals: number;
+    pendingApplications: number;
+    approvedHospitals: number;
+    activeWorkspaces: number;
+    totalUsers: number;
+    activeSubscriptions: number;
+  };
+  applicationOverview: {
+    total: number;
+    pending: number;
+    underReview: number;
+    approved: number;
+  };
+  monthlyGrowth: Array<{ month: string; count: number }>;
+  applications: HospitalApplication[];
+  recentHospitals: ApprovedHospital[];
+  platformActivity: PlatformActivityItem[];
+  agents: AgentProfile[];
+  notifications: HospitalNotification[];
+  systemHealth: {
+    database: 'Healthy';
+    backend: 'Healthy';
+    aiServices: 'Active' | 'Standby';
+    integrations: 'Healthy';
+  };
+}
+
 export interface DashboardOverviewData {
-  isSampleDataset: true;
   hospitalSettings: {
     hospitalName: string;
     timezone: string;

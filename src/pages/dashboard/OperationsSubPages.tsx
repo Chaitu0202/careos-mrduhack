@@ -356,10 +356,36 @@ export function ResourcesPage() {
 export function AnalyticsPage() {
   const { apiFetch } = useAuth();
   const [analytics, setAnalytics] = useState<{
-    summary: { totalPatients: number; bedOccupancyRate: number; avgWaitMinutes: number; totalAgentTasksCompleted: number };
-    deptBreakdown: Array<{ name: string; activePatients: number; bedUtilization: number; avgWaitMinutes: number; staffUtilization: number }>;
-    agentPerformance: Array<{ id: string; name: string; completed: number; pending: number; completionRate: number; avgResponseSeconds: number }>;
-    appointmentTrends: Array<{ label: string; scheduled: number; completed: number; walkIn: number }>;
+    metrics: {
+      totalHospitals: number;
+      pendingApplications: number;
+      approvedHospitals: number;
+      activeWorkspaces: number;
+      totalUsers: number;
+      activeSubscriptions: number;
+    };
+    totalBedsProvisioned: number;
+    totalDeptsProvisioned: number;
+    mrrUsd: number;
+    monthlyGrowth: Array<{ month: string; count: number }>;
+    applicationOverview: { total: number; pending: number; underReview: number; approved: number };
+    hospitals: Array<{
+      id: string;
+      hospitalId: string;
+      hospitalName: string;
+      bedsCount: number;
+      departmentsCount: number;
+      subscriptionPlan: string;
+      workspaceStatus: string;
+    }>;
+    agentPerformance: Array<{
+      id: string;
+      name: string;
+      completed: number;
+      pending: number;
+      completionRate: number;
+      avgResponseSeconds: number;
+    }>;
   } | null>(null);
 
   useEffect(() => {
@@ -367,38 +393,57 @@ export function AnalyticsPage() {
   }, [apiFetch]);
 
   return (
-    <DashboardLayout title="Hospital Analytics" breadcrumb="Management / Analytics">
+    <DashboardLayout
+      title="Platform Analytics"
+      breadcrumb="Platform Analytics"
+      subtitle="Live metrics across hospital onboarding, provisioned capacity, and AI agent execution."
+    >
       {!analytics ? (
-        <div className="h-64 animate-pulse rounded-lg border border-[#E3EDF6] bg-[#F4F9FF]" />
+        <div className="h-64 animate-pulse rounded-2xl border border-[#E3EDF6] bg-white" />
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg border border-[#E3EDF6] bg-white p-4">
-              <div className="text-xs text-[#71839C]">Sample Patient Volume</div>
-              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">{analytics.summary.totalPatients}</div>
+            <div className="rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <div className="text-xs text-[#71839C]">Total Hospital Requests</div>
+              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">
+                {analytics.metrics.totalHospitals}
+              </div>
             </div>
-            <div className="rounded-lg border border-[#E3EDF6] bg-white p-4">
-              <div className="text-xs text-[#71839C]">Calculated Bed Occupancy</div>
-              <div className="mt-1 font-display text-2xl font-bold text-[#3299F5] tabular-nums">{analytics.summary.bedOccupancyRate}%</div>
+            <div className="rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <div className="text-xs text-[#71839C]">Approved Workspaces</div>
+              <div className="mt-1 font-display text-2xl font-bold text-[#3299F5] tabular-nums">
+                {analytics.metrics.activeWorkspaces}
+              </div>
             </div>
-            <div className="rounded-lg border border-[#E3EDF6] bg-white p-4">
-              <div className="text-xs text-[#71839C]">Mean Department Wait</div>
-              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">{analytics.summary.avgWaitMinutes} min</div>
+            <div className="rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <div className="text-xs text-[#71839C]">Provisioned Bed Capacity</div>
+              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">
+                {analytics.totalBedsProvisioned}
+              </div>
             </div>
-            <div className="rounded-lg border border-[#E3EDF6] bg-white p-4">
-              <div className="text-xs text-[#71839C]">Agent Tasks Completed</div>
-              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">{analytics.summary.totalAgentTasksCompleted}</div>
+            <div className="rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <div className="text-xs text-[#71839C]">Monthly Recurring Billing</div>
+              <div className="mt-1 font-display text-2xl font-bold text-[#102653] tabular-nums">
+                ${analytics.mrrUsd.toLocaleString()}
+              </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            <div className="lg:col-span-7 rounded-lg border border-[#E3EDF6] bg-white p-5">
-              <h2 className="mb-4 font-display text-base font-bold text-[#102653]">7-Day Appointment Throughput</h2>
-              <AppointmentTrendChart data={analytics.appointmentTrends} />
+            <div className="lg:col-span-7 rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <h2 className="mb-4 font-display text-base font-bold text-[#102653]">12-Month Registration Trend</h2>
+              <AppointmentTrendChart
+                data={analytics.monthlyGrowth.map((m) => ({
+                  label: m.month,
+                  scheduled: m.count,
+                  completed: m.count,
+                  walkIn: 0,
+                }))}
+              />
             </div>
 
-            <div className="lg:col-span-5 rounded-lg border border-[#E3EDF6] bg-white p-5">
-              <h2 className="mb-4 font-display text-base font-bold text-[#102653]">Agent Completion Performance</h2>
+            <div className="lg:col-span-5 rounded-2xl border border-[#E3EDF6] bg-white p-5">
+              <h2 className="mb-4 font-display text-base font-bold text-[#102653]">AI Agent Execution Rate</h2>
               <div className="space-y-3.5">
                 {analytics.agentPerformance.map((ap) => (
                   <HorizontalBarMetric
@@ -406,39 +451,47 @@ export function AnalyticsPage() {
                     label={ap.name}
                     value={ap.completionRate}
                     max={100}
-                    sublabel={`${ap.completionRate}% · ${ap.avgResponseSeconds}s`}
+                    sublabel={`${ap.completed} tasks · ${ap.completionRate}%`}
                   />
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="rounded-lg border border-[#E3EDF6] bg-white p-5">
-            <h2 className="mb-4 font-display text-base font-bold text-[#102653]">Department Operational Breakdown</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-[#E3EDF6] text-xs text-[#71839C]">
-                  <tr>
-                    <th className="py-2 pr-4">Department</th>
-                    <th className="py-2 px-4 text-right">Active Patients</th>
-                    <th className="py-2 px-4 text-right">Bed Utilization</th>
-                    <th className="py-2 px-4 text-right">Staff Utilization</th>
-                    <th className="py-2 pl-4 text-right">Avg Wait</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E3EDF6] font-mono text-xs tabular-nums">
-                  {analytics.deptBreakdown.map((d) => (
-                    <tr key={d.name}>
-                      <td className="py-2.5 pr-4 font-sans font-medium text-[#102653]">{d.name}</td>
-                      <td className="py-2.5 px-4 text-right">{d.activePatients}</td>
-                      <td className="py-2.5 px-4 text-right text-[#3299F5]">{d.bedUtilization}%</td>
-                      <td className="py-2.5 px-4 text-right">{d.staffUtilization}%</td>
-                      <td className="py-2.5 pl-4 text-right">{d.avgWaitMinutes} min</td>
+          <div className="rounded-2xl border border-[#E3EDF6] bg-white p-5">
+            <h2 className="mb-4 font-display text-base font-bold text-[#102653]">Provisioned Hospital Capacity</h2>
+            {analytics.hospitals.length === 0 ? (
+              <div className="py-8 text-center text-xs text-[#71839C]">
+                No hospitals provisioned yet. Metrics populate dynamically as hospitals are approved.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-[#E3EDF6] bg-[#F4F9FF] text-[#71839C]">
+                    <tr>
+                      <th className="py-2.5 px-3">Hospital ID</th>
+                      <th className="py-2.5 px-3">Hospital Name</th>
+                      <th className="py-2.5 px-3 text-right">Beds</th>
+                      <th className="py-2.5 px-3 text-right">Departments</th>
+                      <th className="py-2.5 px-3 text-right">Plan</th>
+                      <th className="py-2.5 px-3 text-right">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-[#E3EDF6] font-mono tabular-nums">
+                    {analytics.hospitals.map((h) => (
+                      <tr key={h.id}>
+                        <td className="py-2.5 px-3 text-[#71839C]">{h.hospitalId}</td>
+                        <td className="py-2.5 px-3 font-sans font-semibold text-[#102653]">{h.hospitalName}</td>
+                        <td className="py-2.5 px-3 text-right">{h.bedsCount}</td>
+                        <td className="py-2.5 px-3 text-right">{h.departmentsCount}</td>
+                        <td className="py-2.5 px-3 text-right text-[#3299F5]">{h.subscriptionPlan}</td>
+                        <td className="py-2.5 px-3 text-right">{h.workspaceStatus}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -474,13 +527,17 @@ export function IntegrationsDashPage() {
   };
 
   return (
-    <DashboardLayout title="Integrations" breadcrumb="Management / Integrations">
+    <DashboardLayout
+      title="Integrations"
+      breadcrumb="Integrations"
+      subtitle="Configure supported HL7 FHIR, CalDAV, and CareOS REST adapters."
+    >
       {error && (
-        <div className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
       )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {items.map((item) => (
-          <div key={item.id} className="rounded-lg border border-[#E3EDF6] bg-white p-5 flex flex-col justify-between">
+          <div key={item.id} className="rounded-2xl border border-[#E3EDF6] bg-white p-5 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-[#71839C]">{item.category}</span>
@@ -498,7 +555,7 @@ export function IntegrationsDashPage() {
                   type="button"
                   onClick={() => toggleIntegration(item)}
                   className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-semibold transition-colors',
+                    'rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors',
                     item.connected
                       ? 'bg-[#EAF5FF] text-[#102653] border border-[#3299F5]/40'
                       : 'bg-[#102653] text-white'
@@ -527,6 +584,11 @@ export function SettingsAdminPage() {
   const [humanOversight, setHumanOversight] = useState(true);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [pwMsg, setPwMsg] = useState<string | null>(null);
+  const [pwErr, setPwErr] = useState<string | null>(null);
 
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -561,10 +623,27 @@ export function SettingsAdminPage() {
         method: 'PATCH',
         body: JSON.stringify({ hospitalName, timezone, humanOversightRequired: humanOversight }),
       });
-      setSavedMsg('Hospital configuration saved.');
+      setSavedMsg('Platform configuration saved.');
       await loadAdminData();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to save settings.');
+    }
+  };
+
+  const handleRotatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwMsg(null);
+    setPwErr(null);
+    try {
+      await apiFetch('/api/super-admin/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setPwMsg('Super Admin password updated securely.');
+    } catch (err) {
+      setPwErr(err instanceof Error ? err.message : 'Unable to update password.');
     }
   };
 
@@ -578,17 +657,17 @@ export function SettingsAdminPage() {
 
   return (
     <DashboardLayout
-      title={tab === 'admin' ? 'User Management & Audit Logs' : 'Settings'}
-      breadcrumb={`Management / ${tab === 'admin' ? 'Admin Governance' : 'Settings'}`}
+      title={tab === 'admin' ? 'User Management & Audit Logs' : 'Platform Settings'}
+      breadcrumb={tab === 'admin' ? 'Admin Governance' : 'Settings'}
       actions={
         user?.role === 'admin' ? (
-          <div className="flex items-center gap-1 rounded-md border border-[#E3EDF6] bg-[#F4F9FF] p-0.5">
+          <div className="flex items-center gap-1 rounded-xl border border-[#E3EDF6] bg-white p-1">
             <button
               type="button"
               onClick={() => setSearchParams({})}
               className={cn(
-                'rounded px-2.5 py-1 text-xs font-medium',
-                tab === 'general' ? 'bg-white text-[#102653] shadow-xs' : 'text-[#71839C]'
+                'rounded-lg px-3 py-1 text-xs font-semibold',
+                tab === 'general' ? 'bg-[#EAF5FF] text-[#3299F5]' : 'text-[#71839C]'
               )}
             >
               System Settings
@@ -597,11 +676,11 @@ export function SettingsAdminPage() {
               type="button"
               onClick={() => setSearchParams({ tab: 'admin' })}
               className={cn(
-                'rounded px-2.5 py-1 text-xs font-medium',
-                tab === 'admin' ? 'bg-white text-[#102653] shadow-xs' : 'text-[#71839C]'
+                'rounded-lg px-3 py-1 text-xs font-semibold',
+                tab === 'admin' ? 'bg-[#EAF5FF] text-[#3299F5]' : 'text-[#71839C]'
               )}
             >
-              Users & Audit Logs
+              Users &amp; Audit Logs
             </button>
           </div>
         ) : undefined
@@ -609,7 +688,7 @@ export function SettingsAdminPage() {
     >
       {tab === 'admin' && user?.role === 'admin' ? (
         <div className="space-y-6">
-          <div className="rounded-lg border border-[#E3EDF6] bg-white">
+          <div className="rounded-2xl border border-[#E3EDF6] bg-white">
             <div className="flex items-center justify-between border-b border-[#E3EDF6] px-5 py-3.5">
               <div className="flex items-center gap-2">
                 <Shield className="h-4 w-4 text-[#3299F5]" />
@@ -618,7 +697,7 @@ export function SettingsAdminPage() {
               <span className="text-xs text-[#71839C]">{users.length} accounts</span>
             </div>
             {users.length === 0 ? (
-              <div className="p-6 text-sm text-[#71839C]">No additional registered users yet.</div>
+              <div className="p-6 text-sm text-[#71839C]">No registered hospital users yet.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -641,7 +720,7 @@ export function SettingsAdminPage() {
                           <select
                             value={u.role}
                             onChange={(e) => handleRoleUpdate(u.id, e.target.value as UserRole)}
-                            className="h-8 rounded border border-[#E3EDF6] bg-white px-2 text-xs text-[#102653]"
+                            className="h-8 rounded-lg border border-[#E3EDF6] bg-white px-2 text-xs text-[#102653]"
                           >
                             <option value="coordinator">coordinator</option>
                             <option value="clinician">clinician</option>
@@ -657,9 +736,9 @@ export function SettingsAdminPage() {
             )}
           </div>
 
-          <div className="rounded-lg border border-[#E3EDF6] bg-white">
+          <div className="rounded-2xl border border-[#E3EDF6] bg-white">
             <div className="border-b border-[#E3EDF6] px-5 py-3.5">
-              <h2 className="font-display text-base font-bold text-[#102653]">Security & Operational Audit Logs</h2>
+              <h2 className="font-display text-base font-bold text-[#102653]">Security &amp; Operational Audit Logs</h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -676,10 +755,17 @@ export function SettingsAdminPage() {
                   {auditLogs.slice(0, 25).map((log) => (
                     <tr key={log.id}>
                       <td className="px-5 py-2.5 font-mono text-[#71839C]">{formatTimeAgo(log.timestamp)}</td>
-                      <td className="px-5 py-2.5 text-[#102653]">{log.actorEmail} ({log.actorRole})</td>
+                      <td className="px-5 py-2.5 text-[#102653]">
+                        {log.actorEmail} ({log.actorRole})
+                      </td>
                       <td className="px-5 py-2.5 font-mono text-[#172B4D]">{log.action}</td>
                       <td className="px-5 py-2.5 text-[#71839C]">{log.resource}</td>
-                      <td className={cn('px-5 py-2.5 text-right font-semibold', log.outcome === 'Allowed' ? 'text-[#3299F5]' : 'text-red-600')}>
+                      <td
+                        className={cn(
+                          'px-5 py-2.5 text-right font-semibold',
+                          log.outcome === 'Allowed' ? 'text-[#3299F5]' : 'text-red-600'
+                        )}
+                      >
                         {log.outcome}
                       </td>
                     </tr>
@@ -690,31 +776,35 @@ export function SettingsAdminPage() {
           </div>
         </div>
       ) : (
-        <div className="max-w-2xl space-y-6">
-          <div className="rounded-lg border border-[#E3EDF6] bg-white p-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-7 rounded-2xl border border-[#E3EDF6] bg-white p-6">
             <div className="flex items-center gap-2 border-b border-[#E3EDF6] pb-3">
               <Sliders className="h-4 w-4 text-[#3299F5]" />
-              <h2 className="font-display text-base font-bold text-[#102653]">Organization & Clinical Oversight Settings</h2>
+              <h2 className="font-display text-base font-bold text-[#102653]">
+                Organization &amp; Clinical Oversight Settings
+              </h2>
             </div>
 
             {savedMsg && (
-              <div className="mt-4 flex items-center gap-2 rounded-md border border-[#3299F5]/30 bg-[#EAF5FF] px-3.5 py-2.5 text-xs text-[#102653]">
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-[#3299F5]/30 bg-[#EAF5FF] px-3.5 py-2.5 text-xs text-[#102653]">
                 <CheckCircle2 className="h-4 w-4 text-[#3299F5]" />
                 {savedMsg}
               </div>
             )}
             {errorMsg && (
-              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">{errorMsg}</div>
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+                {errorMsg}
+              </div>
             )}
 
             <form onSubmit={handleSaveSettings} className="mt-4 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-[#102653]">Hospital Name</label>
+                <label className="block text-xs font-medium text-[#102653]">Platform / Workspace Name</label>
                 <input
                   value={hospitalName}
                   onChange={(e) => setHospitalName(e.target.value)}
                   disabled={user?.role !== 'admin'}
-                  className="mt-1 h-10 w-full rounded-md border border-[#E3EDF6] px-3 text-sm disabled:bg-[#F4F9FF]"
+                  className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm disabled:bg-[#F4F9FF]"
                 />
               </div>
               <div>
@@ -723,7 +813,7 @@ export function SettingsAdminPage() {
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   disabled={user?.role !== 'admin'}
-                  className="mt-1 h-10 w-full rounded-md border border-[#E3EDF6] px-3 text-sm disabled:bg-[#F4F9FF]"
+                  className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm disabled:bg-[#F4F9FF]"
                 />
               </div>
               <label className="flex items-center gap-2.5 text-sm text-[#172B4D]">
@@ -740,17 +830,67 @@ export function SettingsAdminPage() {
               {user?.role === 'admin' ? (
                 <button
                   type="submit"
-                  className="rounded-md bg-[#102653] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1b3a78]"
+                  className="rounded-xl bg-[#3299F5] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#2383db]"
                 >
                   Save Platform Settings
                 </button>
               ) : (
                 <p className="text-xs text-[#71839C]">
-                  Signed in as <span className="font-medium text-[#102653]">{user?.role}</span>. Platform-wide configuration and audit logs require administrator privileges.
+                  Signed in as <span className="font-medium text-[#102653]">{user?.role}</span>. Platform-wide
+                  configuration requires administrator privileges.
                 </p>
               )}
             </form>
           </div>
+
+          {user?.role === 'admin' && (
+            <div className="lg:col-span-5 rounded-2xl border border-[#E3EDF6] bg-white p-6">
+              <div className="flex items-center gap-2 border-b border-[#E3EDF6] pb-3">
+                <Shield className="h-4 w-4 text-[#3299F5]" />
+                <h2 className="font-display text-base font-bold text-[#102653]">Rotate Super Admin Password</h2>
+              </div>
+
+              {pwMsg && (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700">
+                  {pwMsg}
+                </div>
+              )}
+              {pwErr && (
+                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+                  {pwErr}
+                </div>
+              )}
+
+              <form onSubmit={handleRotatePassword} className="mt-4 space-y-3.5">
+                <div>
+                  <label className="block text-xs font-medium text-[#102653]">Current Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#102653]">New Password (min 8 chars)</label>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#102653] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#1b3a78]"
+                >
+                  Update Password
+                </button>
+              </form>
+            </div>
+          )}
         </div>
       )}
     </DashboardLayout>

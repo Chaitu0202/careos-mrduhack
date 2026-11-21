@@ -416,7 +416,10 @@ export function ContactPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [organization, setOrganization] = useState('');
-  const [roleOrType, setRoleOrType] = useState('Hospital Leadership');
+  const [roleOrType, setRoleOrType] = useState('Multi-Specialty');
+  const [location, setLocation] = useState('');
+  const [phone, setPhone] = useState('');
+  const [bedsCount, setBedsCount] = useState('150');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -436,6 +439,9 @@ export function ContactPage() {
           email,
           organization,
           roleOrType,
+          location,
+          phone,
+          bedsCount: Number(bedsCount) || 150,
           message,
         }),
       });
@@ -451,19 +457,20 @@ export function ContactPage() {
 
   return (
     <PageShell
-      kicker={isDemo ? 'Book a CareOS Demo' : 'Contact CareOS'}
-      title={isDemo ? 'Schedule a personalized hospital' : 'Connect with the'}
-      highlight={isDemo ? 'walkthrough.' : 'CareOS team.'}
-      subtitle="Share your hospital structure and operational goals. Our healthcare implementation specialists will follow up with a tailored briefing."
+      kicker={isDemo ? 'Book a CareOS Demo' : 'Contact & Hospital Onboarding'}
+      title={isDemo ? 'Submit a hospital onboarding or demo' : 'Connect with the'}
+      highlight={isDemo ? 'request.' : 'CareOS team.'}
+      subtitle="Every hospital onboarding or walkthrough request enters our Super Admin queue immediately for review and workspace provisioning."
     >
       <div className="mx-auto max-w-2xl rounded-2xl border border-[#E3EDF6] bg-white p-7 sm:p-9 shadow-[0_14px_40px_rgba(16,38,83,0.06)]">
         {submittedId ? (
           <div className="space-y-4 text-center py-6">
             <CheckCircle2 className="mx-auto h-10 w-10 text-[#3299F5]" />
-            <h2 className="font-display text-2xl font-bold text-[#102653]">Request Received</h2>
+            <h2 className="font-display text-2xl font-bold text-[#102653]">Onboarding Request Submitted</h2>
             <p className="text-sm text-[#71839C]">
-              Thank you, {name}. Your inquiry (<span className="font-mono text-[#102653]">{submittedId}</span>) has been logged for{' '}
-              <span className="font-medium text-[#102653]">{organization}</span>.
+              Thank you, {name}. Application <span className="font-mono font-semibold text-[#102653]">{submittedId}</span>{' '}
+              for <span className="font-medium text-[#102653]">{organization}</span> is now visible in the CareOS Super Admin
+              Hospital Onboarding queue.
             </p>
             <div className="pt-2">
               <Link
@@ -482,7 +489,7 @@ export function ContactPage() {
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="contact-name" className="block text-xs font-semibold text-[#102653]">
-                  Full name
+                  Contact person
                 </label>
                 <input
                   id="contact-name"
@@ -490,7 +497,7 @@ export function ContactPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
-                  placeholder="Dr. Jordan Patel"
+                  placeholder="Dr. Meera Sharma"
                 />
               </div>
               <div>
@@ -504,7 +511,7 @@ export function ContactPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
-                  placeholder="j.patel@hospital.com"
+                  placeholder="meera.sharma@hospital.com"
                 />
               </div>
             </div>
@@ -512,7 +519,7 @@ export function ContactPage() {
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="contact-org" className="block text-xs font-semibold text-[#102653]">
-                  Hospital / Organization
+                  Hospital / Organization name
                 </label>
                 <input
                   id="contact-org"
@@ -520,12 +527,12 @@ export function ContactPage() {
                   value={organization}
                   onChange={(e) => setOrganization(e.target.value)}
                   className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
-                  placeholder="Meridian Regional Health"
+                  placeholder="Apollo Care Institute"
                 />
               </div>
               <div>
                 <label htmlFor="contact-role" className="block text-xs font-semibold text-[#102653]">
-                  Department / Role
+                  Hospital Type
                 </label>
                 <select
                   id="contact-role"
@@ -533,17 +540,59 @@ export function ContactPage() {
                   onChange={(e) => setRoleOrType(e.target.value)}
                   className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] bg-white px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
                 >
-                  <option>Hospital Leadership</option>
-                  <option>Clinical Operations</option>
-                  <option>Nursing & Patient Flow</option>
-                  <option>Health IT / Systems</option>
+                  <option>Multi-Specialty</option>
+                  <option>Academic Medical Center</option>
+                  <option>Community Hospital</option>
+                  <option>Specialty Clinic Network</option>
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+              <div>
+                <label htmlFor="contact-location" className="block text-xs font-semibold text-[#102653]">
+                  Location (City, State)
+                </label>
+                <input
+                  id="contact-location"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                  placeholder="Bengaluru, KA"
+                />
+              </div>
+              <div>
+                <label htmlFor="contact-phone" className="block text-xs font-semibold text-[#102653]">
+                  Phone number
+                </label>
+                <input
+                  id="contact-phone"
+                  required
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                  placeholder="+91 98765 43210"
+                />
+              </div>
+              <div>
+                <label htmlFor="contact-beds" className="block text-xs font-semibold text-[#102653]">
+                  Number of Beds
+                </label>
+                <input
+                  id="contact-beds"
+                  type="number"
+                  min={1}
+                  value={bedsCount}
+                  onChange={(e) => setBedsCount(e.target.value)}
+                  className="mt-1.5 h-11 w-full rounded-lg border border-[#E3EDF6] px-3.5 font-mono text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                />
               </div>
             </div>
 
             <div>
               <label htmlFor="contact-message" className="block text-xs font-semibold text-[#102653]">
-                How can CareOS assist your hospital?
+                Onboarding goals & notes
               </label>
               <textarea
                 id="contact-message"
@@ -552,7 +601,7 @@ export function ContactPage() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 className="mt-1.5 w-full rounded-lg border border-[#E3EDF6] p-3.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
-                placeholder="Tell us about your bed capacity, departments, or coordination priorities..."
+                placeholder="Share your hospital departments, bed count, or workflow onboarding needs..."
               />
             </div>
 
@@ -561,7 +610,7 @@ export function ContactPage() {
               disabled={loading}
               className="inline-flex h-11 w-full items-center justify-center rounded-full bg-[#3299F5] px-6 text-sm font-semibold text-white shadow-[0_6px_18px_rgba(50,153,245,0.28)] transition-colors hover:bg-[#2383db] disabled:opacity-60"
             >
-              {loading ? 'Submitting...' : isDemo ? 'Request Walkthrough' : 'Send Message'}
+              {loading ? 'Submitting Request...' : isDemo ? 'Submit Onboarding Request' : 'Send Request'}
             </button>
           </form>
         )}
@@ -569,3 +618,4 @@ export function ContactPage() {
     </PageShell>
   );
 }
+

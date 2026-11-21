@@ -26,6 +26,13 @@ import {
   ResourcesPage,
   SettingsAdminPage,
 } from './pages/dashboard/OperationsSubPages';
+import {
+  AuditLogsPage,
+  HospitalApplicationsPage,
+  HospitalDirectoryPage,
+  SubscriptionsBillingPage,
+  SuperAdminUsersPage,
+} from './pages/dashboard/SuperAdminPages';
 
 function ScrollManager() {
   const { pathname, hash } = useLocation();
@@ -44,10 +51,13 @@ function ScrollManager() {
   return null;
 }
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
+  const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+  if (adminOnly && user?.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
   }
   return <>{children}</>;
 }
@@ -73,7 +83,7 @@ export default function App() {
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-          {/* Protected CareOS Application */}
+          {/* Super Admin Platform Routes */}
           <Route
             path="/dashboard"
             element={
@@ -82,6 +92,64 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/dashboard/applications"
+            element={
+              <ProtectedRoute adminOnly>
+                <HospitalApplicationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/applications/:id"
+            element={
+              <ProtectedRoute adminOnly>
+                <HospitalApplicationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/directory"
+            element={
+              <ProtectedRoute adminOnly>
+                <HospitalDirectoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/approved"
+            element={
+              <ProtectedRoute adminOnly>
+                <HospitalDirectoryPage approvedOnly />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/users"
+            element={
+              <ProtectedRoute adminOnly>
+                <SuperAdminUsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/billing"
+            element={
+              <ProtectedRoute adminOnly>
+                <SubscriptionsBillingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/audit-logs"
+            element={
+              <ProtectedRoute adminOnly>
+                <AuditLogsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Shared / Hospital Operations Routes */}
           <Route
             path="/dashboard/agents"
             element={

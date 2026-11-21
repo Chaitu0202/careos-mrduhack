@@ -1,6 +1,18 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Building2, CheckCircle2, Eye, EyeOff, Lock, Mail, Phone, User } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  MapPin,
+  Phone,
+  User,
+} from 'lucide-react';
 import { CareOSLogo } from '../components/CareOSLogo';
 import { useAuth } from '../context/AuthContext';
 import type { AuthUser } from '../types/careos';
@@ -12,7 +24,10 @@ export function SignupPage() {
   const [fullName, setFullName] = useState('');
   const [workEmail, setWorkEmail] = useState('');
   const [hospitalName, setHospitalName] = useState('');
-  const [hospitalType, setHospitalType] = useState('Multi-Specialty Hospital');
+  const [hospitalType, setHospitalType] = useState('Multi-Specialty');
+  const [location, setLocation] = useState('');
+  const [bedsCount, setBedsCount] = useState('150');
+  const [departmentsCount, setDepartmentsCount] = useState('12');
   const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -51,6 +66,9 @@ export function SignupPage() {
         password,
         hospitalName: hospitalName.trim(),
         hospitalType,
+        location: location.trim() || 'Not specified',
+        bedsCount: Number(bedsCount) || 150,
+        departmentsCount: Number(departmentsCount) || 12,
         contactNumber: contactNumber.trim(),
         agreedToTerms,
       });
@@ -68,45 +86,50 @@ export function SignupPage() {
         <div className="mx-auto w-full max-w-[520px] rounded-2xl border border-[#E3EDF6] bg-white p-8 shadow-[0_18px_48px_rgba(16,38,83,0.08)]">
           <div className="flex items-center justify-between border-b border-[#E3EDF6] pb-5">
             <CareOSLogo variant="compact" />
-            <span className="text-xs font-semibold text-[#3299F5]">Organization Onboarding</span>
+            <span className="text-xs font-semibold text-[#3299F5]">Application Submitted</span>
           </div>
 
           <div className="mt-6 flex items-start gap-3">
             <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[#3299F5]" />
             <div>
               <h1 className="font-display text-2xl font-bold text-[#102653]">
-                Workspace Ready for {createdUser.hospitalName}
+                Onboarding Request Submitted
               </h1>
               <p className="mt-1.5 text-sm text-[#71839C]">
-                Your account ({createdUser.email}) has been provisioned with{' '}
-                <span className="font-medium text-[#102653]">Care Coordinator</span> access.
+                Your organization <span className="font-semibold text-[#102653]">{createdUser.hospitalName}</span> has
+                been queued for CareOS Super Admin verification.
               </p>
             </div>
           </div>
 
           <div className="mt-6 space-y-3 rounded-xl border border-[#E3EDF6] bg-[#F4F9FF] p-5 text-sm">
-            <div className="font-semibold text-[#102653]">Initial Onboarding Checklist</div>
-            <div className="flex items-center gap-2.5 text-[#172B4D]">
-              <CheckCircle2 className="h-4 w-4 text-[#3299F5]" />
-              <span>Organization profile configured ({createdUser.hospitalType})</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[#71839C]">Application Reference</span>
+              <span className="font-mono font-semibold text-[#102653]">{createdUser.applicationId || 'Submitted'}</span>
             </div>
-            <div className="flex items-center gap-2.5 text-[#172B4D]">
-              <CheckCircle2 className="h-4 w-4 text-[#3299F5]" />
-              <span>Sample hospital operational dataset loaded for exploration</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[#71839C]">Status</span>
+              <span className="font-semibold text-amber-600">Pending Super Admin Review</span>
             </div>
-            <div className="flex items-center gap-2.5 text-[#172B4D]">
-              <CheckCircle2 className="h-4 w-4 text-[#3299F5]" />
-              <span>All 6 CareOS AI agents active under human oversight policy</span>
-            </div>
+            <p className="border-t border-[#E3EDF6] pt-3 text-xs leading-relaxed text-[#71839C]">
+              Once approved in the CareOS Platform Command Center, your hospital directory record and full operations
+              workspace will unlock automatically.
+            </p>
           </div>
 
-          <div className="mt-7 flex justify-end">
+          <div className="mt-7 flex items-center justify-between gap-3">
+            <Link
+              to="/"
+              className="text-xs font-semibold text-[#71839C] hover:text-[#102653]"
+            >
+              Return to website
+            </Link>
             <button
               type="button"
               onClick={() => navigate('/dashboard', { replace: true })}
               className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#3299F5] px-6 text-sm font-semibold text-white hover:bg-[#2383db]"
             >
-              Launch CareOS Dashboard
+              View Onboarding Status
               <ArrowRight className="h-4 w-4" />
             </button>
           </div>
@@ -117,9 +140,8 @@ export function SignupPage() {
 
   return (
     <div className="min-h-screen bg-[#F4F9FF] flex flex-col justify-center px-4 py-10 sm:px-6">
-      <div className="mx-auto w-full max-w-[490px]">
+      <div className="mx-auto w-full max-w-[510px]">
         <div className="relative overflow-hidden rounded-2xl border border-[#E3EDF6] bg-white p-7 sm:p-9 shadow-[0_18px_48px_rgba(16,38,83,0.08)]">
-          {/* Soft Ice-Blue Curved Corner Accents */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute -top-12 -left-12 h-36 w-36 rounded-full bg-[#EAF5FF]/70"
@@ -148,7 +170,7 @@ export function SignupPage() {
                 Create your CareOS account
               </h1>
               <p className="mt-1 text-sm text-[#71839C]">
-                Bring your hospital operations together with CareOS.
+                Submit your hospital details to begin CareOS onboarding.
               </p>
             </div>
 
@@ -159,38 +181,39 @@ export function SignupPage() {
             )}
 
             <form onSubmit={handleSubmit} className="mt-5 space-y-3.5" noValidate>
-              <div>
-                <label htmlFor="signup-name" className="block text-xs font-semibold text-[#102653]">
-                  Full name
-                </label>
-                <div className="relative mt-1">
-                  <User className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
-                  <input
-                    id="signup-name"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="Dr. Jordan Patel"
-                  />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="signup-name" className="block text-xs font-semibold text-[#102653]">
+                    Full name
+                  </label>
+                  <div className="relative mt-1">
+                    <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <input
+                      id="signup-name"
+                      required
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-3 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
+                      placeholder="Dr. Meera Sharma"
+                    />
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <label htmlFor="signup-email" className="block text-xs font-semibold text-[#102653]">
-                  Work email
-                </label>
-                <div className="relative mt-1">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
-                  <input
-                    id="signup-email"
-                    type="email"
-                    required
-                    value={workEmail}
-                    onChange={(e) => setWorkEmail(e.target.value)}
-                    className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="you@hospital.com"
-                  />
+                <div>
+                  <label htmlFor="signup-email" className="block text-xs font-semibold text-[#102653]">
+                    Work email
+                  </label>
+                  <div className="relative mt-1">
+                    <Mail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <input
+                      id="signup-email"
+                      type="email"
+                      required
+                      value={workEmail}
+                      onChange={(e) => setWorkEmail(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-3 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
+                      placeholder="you@hospital.com"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -200,13 +223,13 @@ export function SignupPage() {
                     Hospital / Organization name
                   </label>
                   <div className="relative mt-1">
-                    <Building2 className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <Building2 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
                     <input
                       id="signup-hospital"
                       required
                       value={hospitalName}
                       onChange={(e) => setHospitalName(e.target.value)}
-                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-3 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-3 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
                       placeholder="City General Hospital"
                     />
                   </div>
@@ -221,11 +244,55 @@ export function SignupPage() {
                     onChange={(e) => setHospitalType(e.target.value)}
                     className="mt-1 h-10 w-full rounded-lg border border-[#E3EDF6] bg-white px-3 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
                   >
-                    <option>Multi-Specialty Hospital</option>
+                    <option>Multi-Specialty</option>
                     <option>Academic Medical Center</option>
                     <option>Community Hospital</option>
                     <option>Specialty Clinic Network</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-1">
+                  <label htmlFor="signup-location" className="block text-xs font-semibold text-[#102653]">
+                    Location
+                  </label>
+                  <div className="relative mt-1">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <input
+                      id="signup-location"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-2.5 text-sm text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                      placeholder="Bengaluru, KA"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="signup-beds" className="block text-xs font-semibold text-[#102653]">
+                    Beds
+                  </label>
+                  <input
+                    id="signup-beds"
+                    type="number"
+                    min={1}
+                    value={bedsCount}
+                    onChange={(e) => setBedsCount(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-[#E3EDF6] px-3 text-sm font-mono text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="signup-depts" className="block text-xs font-semibold text-[#102653]">
+                    Departments
+                  </label>
+                  <input
+                    id="signup-depts"
+                    type="number"
+                    min={1}
+                    value={departmentsCount}
+                    onChange={(e) => setDepartmentsCount(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-[#E3EDF6] px-3 text-sm font-mono text-[#172B4D] focus:border-[#3299F5] focus:outline-none"
+                  />
                 </div>
               </div>
 
@@ -242,52 +309,53 @@ export function SignupPage() {
                     value={contactNumber}
                     onChange={(e) => setContactNumber(e.target.value)}
                     className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="+1 (415) 555-0190"
+                    placeholder="+91 98765 43210"
                   />
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="signup-password" className="block text-xs font-semibold text-[#102653]">
-                  Password
-                </label>
-                <div className="relative mt-1">
-                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
-                  <input
-                    id="signup-password"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-10 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="Enter your password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#71839C]"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="signup-password" className="block text-xs font-semibold text-[#102653]">
+                    Password
+                  </label>
+                  <div className="relative mt-1">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <input
+                      id="signup-password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-9 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
+                      placeholder="Min 8 chars"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#71839C]"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <label htmlFor="signup-confirm" className="block text-xs font-semibold text-[#102653]">
-                  Confirm password
-                </label>
-                <div className="relative mt-1">
-                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
-                  <input
-                    id="signup-confirm"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="Confirm your password"
-                  />
+                <div>
+                  <label htmlFor="signup-confirm" className="block text-xs font-semibold text-[#102653]">
+                    Confirm password
+                  </label>
+                  <div className="relative mt-1">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
+                    <input
+                      id="signup-confirm"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="h-10 w-full rounded-lg border border-[#E3EDF6] pl-9 pr-3 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
+                      placeholder="Confirm"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -309,7 +377,7 @@ export function SignupPage() {
                 disabled={loading}
                 className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg bg-[#3299F5] px-4 text-sm font-semibold text-white shadow-[0_6px_18px_rgba(50,153,245,0.28)] transition-colors hover:bg-[#2383db] disabled:opacity-60"
               >
-                {loading ? 'Creating Account...' : 'Create Account'}
+                {loading ? 'Submitting Onboarding...' : 'Create Account'}
               </button>
             </form>
 
