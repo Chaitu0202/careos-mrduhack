@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
   AgentProfile,
@@ -73,6 +73,10 @@ interface TokenPayload {
   name: string;
   role: UserRole;
   hospitalName: string;
+  status?: 'active' | 'pending' | 'suspended';
+  applicationId?: string;
+  hospitalId?: string;
+  hospitalType?: string;
   jti: string;
   iat: number;
   exp: number;
@@ -83,20 +87,28 @@ interface AuthenticatedRequest extends Request {
 }
 
 const PORT = Number(process.env.PORT || 3000);
-const DATA_DIR = path.resolve(process.cwd(), '.data');
+const IS_VERCEL = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'careos-data') : path.resolve(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'careos-db.json');
 
-// Precomputed one-way scrypt hash for initial admin bootstrap when ADMIN_PASSWORD env var is unset
-const INITIAL_ADMIN_EMAIL = 'admin@careos.com';
+// Precomputed one-way scrypt hash for initial admin & test hospital ('password')
+const INITIAL_ADMIN_EMAIL = 'admin@gmail.com';
 const INITIAL_ADMIN_SCRYPT_HASH =
-  'd19dc48f2f60f7f316bb08a96a8c171a:3449fa810320dd8124dbc92df0f5bf6f0a1b0fcee48214736409da5be88d2ab2fcabe90240a496472de4e4c5affec5a83bc90dec0b9a307abec29b1fb3333116';
+  '6fa016150dd327a4c6251ab5e7fe301c:2a131148d03256cea67cd1dce1b97d8ceb531eb3867fe5d82675b37d1cf15237b93ef06f58d0e170c8acbb9d49b40f0cb5f798647abcfba69d4d595c2e7ce01b';
 
-// Precomputed one-way scrypt hash for newly onboarded hospitals' temporary first-login password and starting test hospital
+// Precomputed one-way scrypt hash for newly onboarded hospitals' temporary first-login password and starting test hospital ('password')
 const INITIAL_TEST_HOSPITAL_EMAIL = 'hospital@gmail.com';
 const INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH =
   '6fa016150dd327a4c6251ab5e7fe301c:2a131148d03256cea67cd1dce1b97d8ceb531eb3867fe5d82675b37d1cf15237b93ef06f58d0e170c8acbb9d49b40f0cb5f798647abcfba69d4d595c2e7ce01b';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_SECRET =
+  process.env.SESSION_SECRET ||
+  crypto
+    .createHash('sha256')
+    .update(
+      `careos-session:${process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY || process.env.VERCEL_PROJECT_PRODUCTION_URL || 'careos-platform-signing-secret-v1'}`
+    )
+    .digest('hex');
 const revokedTokens = new Map<string, number>();
 
 function hashPassword(password: string): Promise<string> {
@@ -408,20 +420,27 @@ function createInitialDatabase(): CareOSDatabase {
 }
 
 function loadDatabase(): CareOSDatabase {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DB_FILE)) {
-    const initial = createInitialDatabase();
-    saveDatabase(initial);
-    return initial;
-  }
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_FILE)) {
+      const initial = createInitialDatabase();
+      saveDatabase(initial);
+      return initial;
+    }
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as CareOSDatabase;
-    // Ensure seeded admin, starting test hospital, and normalized arrays exist
+    // Ensure seeded admin (admin@gmail.com / password), starting test hospital, and normalized arrays exist
     let modified = false;
-    if (!parsed.users.some((u) => u.role === 'admin')) {
+    const seededAdmin = parsed.users.find((u) => u.id === 'usr-super-admin');
+    if (seededAdmin) {
+      if (seededAdmin.email !== INITIAL_ADMIN_EMAIL || seededAdmin.passwordHash !== INITIAL_ADMIN_SCRYPT_HASH) {
+        seededAdmin.email = INITIAL_ADMIN_EMAIL;
+        seededAdmin.passwordHash = INITIAL_ADMIN_SCRYPT_HASH;
+        modified = true;
+      }
+    } else if (!parsed.users.some((u) => u.role === 'admin')) {
       parsed.users.unshift(createInitialDatabase().users[0]);
       modified = true;
     }
@@ -429,23 +448,27 @@ function loadDatabase(): CareOSDatabase {
       parsed.users.push(createInitialDatabase().users[1]);
       modified = true;
     }
-    if (modified) {
-      saveDatabase(parsed);
-    }
     if (!Array.isArray(parsed.moduleRecords)) {
       parsed.moduleRecords = [];
+      modified = true;
     }
     if (!Array.isArray(parsed.workflowExecutions)) {
       parsed.workflowExecutions = [];
+      modified = true;
     }
     if (!Array.isArray(parsed.departmentalAlerts)) {
       parsed.departmentalAlerts = [];
+      modified = true;
     }
     if (typeof parsed.hospitalSettings?.voiceResponsesEnabled !== 'boolean') {
       parsed.hospitalSettings = {
         ...parsed.hospitalSettings,
         voiceResponsesEnabled: true,
       };
+      modified = true;
+    }
+    if (modified) {
+      saveDatabase(parsed);
     }
     return parsed;
   } catch {
@@ -456,12 +479,16 @@ function loadDatabase(): CareOSDatabase {
 }
 
 function saveDatabase(db: CareOSDatabase): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmpFile = `${DB_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(db, null, 2), 'utf8');
+    fs.renameSync(tmpFile, DB_FILE);
+  } catch {
+    // Graceful fallback when running in restricted/read-only serverless sandboxes
   }
-  const tmpFile = `${DB_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(db, null, 2), 'utf8');
-  fs.renameSync(tmpFile, DB_FILE);
 }
 
 let db = loadDatabase();
@@ -647,7 +674,13 @@ function computeSuperAdminOverview() {
     systemHealth: {
       database: 'Healthy' as const,
       backend: 'Healthy' as const,
-      aiServices: process.env.GEMINI_API_KEY ? ('Active' as const) : ('Standby' as const),
+      aiServices:
+        process.env.GEMINI_API_KEY1 ||
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.API_KEY
+          ? ('Active' as const)
+          : ('Standby' as const),
       integrations: 'Healthy' as const,
     },
   };
@@ -972,7 +1005,7 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
   next();
 }
 
-async function startServer() {
+export function createApiApp() {
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
@@ -1073,6 +1106,10 @@ async function startServer() {
         name: user.fullName,
         role: user.role,
         hospitalName: user.hospitalName,
+        status: user.status,
+        applicationId: user.applicationId,
+        hospitalId: user.hospitalId,
+        hospitalType: user.hospitalType,
       },
       ttlSeconds
     );
@@ -1199,6 +1236,9 @@ async function startServer() {
         name: newUser.fullName,
         role: newUser.role,
         hospitalName: newUser.hospitalName,
+        status: newUser.status,
+        applicationId: newUser.applicationId,
+        hospitalType: newUser.hospitalType,
       },
       8 * 3600
     );
@@ -1230,9 +1270,11 @@ async function startServer() {
         email: u.email,
         role: u.role,
         hospitalName: u.hospitalName,
-        hospitalType: 'Platform Governance',
-        contactNumber: 'Platform Admin',
-        status: 'active',
+        hospitalType: u.hospitalType || (u.role === 'admin' ? 'Platform Governance' : 'Multi-Specialty'),
+        applicationId: u.applicationId,
+        hospitalId: u.hospitalId,
+        contactNumber: u.role === 'admin' ? 'Platform Admin' : 'Hospital Administrator',
+        status: u.status || (u.role === 'admin' ? 'active' : 'pending'),
         createdAt: new Date(u.iat * 1000).toISOString(),
       },
     });
@@ -2536,7 +2578,15 @@ async function startServer() {
     res.status(404).json({ error: 'API endpoint not found.' });
   });
 
+  return app;
+}
+
+export const app = createApiApp();
+export default app;
+
+async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2555,4 +2605,6 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!IS_VERCEL && process.env.CAREOS_NO_LISTEN !== '1') {
+  startServer();
+}

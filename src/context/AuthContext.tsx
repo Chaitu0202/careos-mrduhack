@@ -109,17 +109,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [apiFetch, token]);
 
+  const parseJsonAuthResponse = async (res: Response, fallbackMsg: string) => {
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error(
+        `Authentication service returned an unexpected response (${res.status}). Check server/API routing.`
+      );
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || fallbackMsg);
+    }
+    return data;
+  };
+
   const login = useCallback(async (email: string, password: string, rememberMe = false): Promise<AuthUser> => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, rememberMe }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error((data as { error?: string }).error || 'Sign in failed.');
-    }
-    const result = data as { token: string; user: AuthUser };
+    const result = (await parseJsonAuthResponse(res, 'Sign in failed.')) as {
+      token: string;
+      user: AuthUser;
+    };
     setToken(result.token);
     setUser(result.user);
     return result.user;
@@ -131,11 +144,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error((data as { error?: string }).error || 'Registration failed.');
-    }
-    const result = data as { token: string; user: AuthUser };
+    const result = (await parseJsonAuthResponse(res, 'Registration failed.')) as {
+      token: string;
+      user: AuthUser;
+    };
     setToken(result.token);
     setUser(result.user);
     return result.user;
@@ -148,11 +160,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((data as { error?: string }).error || 'Administrator setup failed.');
-      }
-      const result = data as { token: string; user: AuthUser };
+      const result = (await parseJsonAuthResponse(res, 'Administrator setup failed.')) as {
+        token: string;
+        user: AuthUser;
+      };
       setToken(result.token);
       setUser(result.user);
       await refreshAdminStatus();
