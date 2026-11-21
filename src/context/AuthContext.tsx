@@ -36,6 +36,7 @@ interface AuthContextValue {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<AuthUser>;
   signup: (payload: SignupPayload) => Promise<AuthUser>;
   claimAdmin: (payload: ClaimAdminPayload) => Promise<AuthUser>;
+  changeDefaultPassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   apiFetch: <T>(path: string, options?: RequestInit) => Promise<T>;
 }
@@ -77,6 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers.set('Authorization', `Bearer ${token}`);
       }
       const res = await fetch(path, { ...options, headers });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        if (!res.ok) {
+          throw new Error(`Request failed (${res.status}).`);
+        }
+        throw new Error('Unexpected non-JSON response from server. Please refresh and try again.');
+      }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 401 && token) {
@@ -153,6 +161,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refreshAdminStatus]
   );
 
+  const changeDefaultPassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<AuthUser> => {
+      const res = await apiFetch<{ ok: boolean; user: AuthUser }>('/api/auth/change-default-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setUser(res.user);
+      return res.user;
+    },
+    [apiFetch]
+  );
+
   const logout = useCallback(async () => {
     if (token) {
       await fetch('/api/auth/logout', {
@@ -176,6 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         signup,
         claimAdmin,
+        changeDefaultPassword,
         logout,
         apiFetch,
       }}

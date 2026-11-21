@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI, Type } from '@google/genai';
 import type {
   AgentProfile,
   ApplicationStatus,
@@ -11,12 +12,18 @@ import type {
   ApprovedHospital,
   AuditLogEntry,
   AuthUser,
+  DepartmentAlertItem,
   DepartmentRecord,
   HospitalApplication,
+  HospitalModuleKey,
+  HospitalModuleRecord,
   HospitalNotification,
   IntegrationItem,
+  InterAgentMessage,
   OperationalTask,
+  OrchestratorAgentKey,
   PatientRecord,
+  PendingApprovalItem,
   PlatformActivityItem,
   ResourceItem,
   StaffMember,
@@ -24,6 +31,7 @@ import type {
   SubscriptionRecord,
   UserRole,
   WorkflowDefinition,
+  WorkflowExecutionRecord,
 } from './src/types/careos.ts';
 
 interface StoredUser extends AuthUser {
@@ -41,6 +49,7 @@ interface CareOSDatabase {
     timezone: string;
     humanOversightRequired: boolean;
     sessionTimeoutMinutes: number;
+    voiceResponsesEnabled: boolean;
   };
   patients: PatientRecord[];
   appointments: AppointmentRecord[];
@@ -53,6 +62,9 @@ interface CareOSDatabase {
   notifications: HospitalNotification[];
   staff: StaffMember[];
   auditLogs: AuditLogEntry[];
+  moduleRecords: HospitalModuleRecord[];
+  workflowExecutions: WorkflowExecutionRecord[];
+  departmentalAlerts: DepartmentAlertItem[];
 }
 
 interface TokenPayload {
@@ -78,6 +90,11 @@ const DB_FILE = path.join(DATA_DIR, 'careos-db.json');
 const INITIAL_ADMIN_EMAIL = 'admin@careos.com';
 const INITIAL_ADMIN_SCRYPT_HASH =
   'd19dc48f2f60f7f316bb08a96a8c171a:3449fa810320dd8124dbc92df0f5bf6f0a1b0fcee48214736409da5be88d2ab2fcabe90240a496472de4e4c5affec5a83bc90dec0b9a307abec29b1fb3333116';
+
+// Precomputed one-way scrypt hash for newly onboarded hospitals' temporary first-login password and starting test hospital
+const INITIAL_TEST_HOSPITAL_EMAIL = 'hospital@gmail.com';
+const INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH =
+  '6fa016150dd327a4c6251ab5e7fe301c:2a131148d03256cea67cd1dce1b97d8ceb531eb3867fe5d82675b37d1cf15237b93ef06f58d0e170c8acbb9d49b40f0cb5f798647abcfba69d4d595c2e7ce01b';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const revokedTokens = new Map<string, number>();
@@ -164,8 +181,24 @@ function createInitialDatabase(): CareOSDatabase {
     passwordHash: INITIAL_ADMIN_SCRYPT_HASH,
   };
 
+  const seededTestHospital: StoredUser = {
+    id: 'usr-test-hospital',
+    fullName: 'Hospital Administrator',
+    email: INITIAL_TEST_HOSPITAL_EMAIL,
+    role: 'coordinator',
+    hospitalName: 'CareOS Test Hospital',
+    hospitalType: 'Multi-Specialty',
+    hospitalId: 'HSP-00001',
+    applicationId: 'APP-TEST-0001',
+    contactNumber: 'Hospital Command Desk',
+    status: 'active',
+    mustChangePassword: false,
+    createdAt: new Date().toISOString(),
+    passwordHash: INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH,
+  };
+
   return {
-    users: [seededAdmin],
+    users: [seededAdmin, seededTestHospital],
     applications: [],
     hospitals: [],
     subscriptions: [],
@@ -175,6 +208,7 @@ function createInitialDatabase(): CareOSDatabase {
       timezone: 'America/Los_Angeles',
       humanOversightRequired: true,
       sessionTimeoutMinutes: 480,
+      voiceResponsesEnabled: true,
     },
     patients: [],
     appointments: [],
@@ -367,6 +401,9 @@ function createInitialDatabase(): CareOSDatabase {
     notifications: [],
     staff: [],
     auditLogs: [],
+    moduleRecords: [],
+    workflowExecutions: [],
+    departmentalAlerts: [],
   };
 }
 
@@ -382,10 +419,33 @@ function loadDatabase(): CareOSDatabase {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw) as CareOSDatabase;
-    // Ensure seeded admin exists if file was empty/legacy
+    // Ensure seeded admin, starting test hospital, and normalized arrays exist
+    let modified = false;
     if (!parsed.users.some((u) => u.role === 'admin')) {
       parsed.users.unshift(createInitialDatabase().users[0]);
+      modified = true;
+    }
+    if (!parsed.users.some((u) => u.email.toLowerCase() === INITIAL_TEST_HOSPITAL_EMAIL)) {
+      parsed.users.push(createInitialDatabase().users[1]);
+      modified = true;
+    }
+    if (modified) {
       saveDatabase(parsed);
+    }
+    if (!Array.isArray(parsed.moduleRecords)) {
+      parsed.moduleRecords = [];
+    }
+    if (!Array.isArray(parsed.workflowExecutions)) {
+      parsed.workflowExecutions = [];
+    }
+    if (!Array.isArray(parsed.departmentalAlerts)) {
+      parsed.departmentalAlerts = [];
+    }
+    if (typeof parsed.hospitalSettings?.voiceResponsesEnabled !== 'boolean') {
+      parsed.hospitalSettings = {
+        ...parsed.hospitalSettings,
+        voiceResponsesEnabled: true,
+      };
     }
     return parsed;
   } catch {
@@ -542,7 +602,7 @@ function computeSuperAdminOverview() {
   ).length;
   const approvedHospitals = db.hospitals.length;
   const activeWorkspaces = db.hospitals.filter((h) => h.workspaceStatus === 'Active').length;
-  const totalUsers = db.users.filter((u) => u.role !== 'admin').length;
+  const totalUsers = db.users.filter((u) => u.role !== 'admin' && u.id !== 'usr-test-hospital').length;
   const activeSubscriptions = db.subscriptions.filter((s) => s.status === 'Active').length;
 
   const pendingCount = db.applications.filter((a) => a.status === 'Pending' || a.status === 'Docs Requested').length;
@@ -593,6 +653,66 @@ function computeSuperAdminOverview() {
   };
 }
 
+function provisionHospitalWorkspaceDefaults(appRecord: HospitalApplication, hospitalId: string): { createdDefaultAccount: boolean } {
+  let createdDefaultAccount = false;
+
+  const existingLinked = db.users.filter(
+    (u) => u.id === appRecord.applicantUserId || u.email.toLowerCase() === appRecord.email.toLowerCase()
+  );
+
+  if (existingLinked.length > 0) {
+    existingLinked.forEach((u) => {
+      u.status = 'active';
+      u.hospitalId = hospitalId;
+      u.applicationId = appRecord.applicationId;
+      u.hospitalName = appRecord.hospitalName;
+    });
+  } else {
+    const newHospitalAdmin: StoredUser = {
+      id: `usr-${crypto.randomUUID().slice(0, 8)}`,
+      fullName: appRecord.contactPerson,
+      email: appRecord.email.toLowerCase(),
+      role: 'coordinator',
+      hospitalName: appRecord.hospitalName,
+      hospitalType: appRecord.hospitalType,
+      hospitalId,
+      applicationId: appRecord.applicationId,
+      contactNumber: appRecord.phone,
+      status: 'active',
+      mustChangePassword: true,
+      createdAt: new Date().toISOString(),
+      passwordHash: INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH,
+    };
+    db.users.push(newHospitalAdmin);
+    createdDefaultAccount = true;
+  }
+
+  if (db.departments.length === 0) {
+    db.departments = [
+      { id: 'dept-cardio', name: 'Cardiology', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.2)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+      { id: 'dept-er', name: 'Emergency', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.15)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+      { id: 'dept-gen', name: 'General Medicine', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(20, Math.round(appRecord.bedsCount * 0.4)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
+    ];
+  }
+
+  if (db.resources.length === 0) {
+    db.resources = [
+      {
+        id: 'res-beds-main',
+        name: 'Inpatient Ward & ICU Beds',
+        category: 'Beds',
+        department: 'Hospital-Wide',
+        total: appRecord.bedsCount || 150,
+        available: appRecord.bedsCount || 150,
+        inUse: 0,
+        maintenance: 0,
+      },
+    ];
+  }
+
+  return { createdDefaultAccount };
+}
+
 function computeHospitalOverview(range: string, hospitalName: string) {
   const totalPatients = db.patients.length;
   const today = getTodayDateString();
@@ -611,6 +731,150 @@ function computeHospitalOverview(range: string, hospitalName: string) {
       ? Math.round(db.departments.reduce((acc, d) => acc + d.avgWaitMinutes, 0) / db.departments.length)
       : 0;
   const totalAgentTasksCompleted = db.agents.reduce((acc, a) => acc + a.completedTasks, 0);
+  const aiAgentActivities = db.agents.reduce((acc, a) => acc + a.assignedTasks, 0);
+
+  const radiologyCount = db.moduleRecords.filter((r) => r.module === 'radiology').length;
+  const laboratoryCount = db.moduleRecords.filter((r) => r.module === 'laboratory').length;
+  const pharmacyCount = db.moduleRecords.filter((r) => r.module === 'pharmacy').length;
+  const billingCount = db.moduleRecords.filter((r) => r.module === 'billing').length;
+  const insuranceCount = db.moduleRecords.filter((r) => r.module === 'insurance').length;
+  const salesCount = db.moduleRecords.filter((r) => r.module === 'sales').length;
+  const marketingCount = db.moduleRecords.filter((r) => r.module === 'marketing').length;
+
+  const orchestrationNodes = [
+    {
+      id: 'agent-operations',
+      title: 'Finance & Billing',
+      subtitle: 'Billing · Payments · Revenue',
+      side: 'left' as const,
+      status: (billingCount > 0 ? 'Active' : 'Standby') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: billingCount,
+      department: 'Finance & Billing',
+    },
+    {
+      id: 'agent-clinical',
+      title: 'Radiology',
+      subtitle: 'RIS · PACS · DICOM',
+      side: 'left' as const,
+      status: (radiologyCount > 0 ? 'Active' : 'Standby') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: radiologyCount,
+      department: 'Radiology',
+    },
+    {
+      id: 'agent-flow',
+      title: 'Appointments & Patient Operations',
+      subtitle: 'HIS · EMR · Messaging',
+      side: 'left' as const,
+      status: (todaysAppointments > 0 || totalPatients > 0 ? 'Processing' : 'Active') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: todaysAppointments + totalPatients,
+      department: 'Patient Operations',
+    },
+    {
+      id: 'agent-compliance',
+      title: 'Insurance & Discharge',
+      subtitle: 'TPA · Claims · Records',
+      side: 'right' as const,
+      status: (insuranceCount > 0 || activeAdmissions > 0 ? 'Active' : 'Standby') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: insuranceCount,
+      department: 'Insurance & Claims',
+    },
+    {
+      id: 'agent-support',
+      title: 'Sales & Business Development',
+      subtitle: 'CRM · Leads · Partnerships',
+      side: 'right' as const,
+      status: (salesCount > 0 ? 'Processing' : 'Standby') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: salesCount,
+      department: 'Sales & Leads',
+    },
+    {
+      id: 'agent-analytics',
+      title: 'Marketing Intelligence',
+      subtitle: 'Campaigns · Analytics',
+      side: 'right' as const,
+      status: (marketingCount > 0 ? 'Active' : 'Standby') as 'Active' | 'Processing' | 'Standby',
+      tasksCount: marketingCount,
+      department: 'Marketing',
+    },
+  ];
+
+  // Build real live activity feed from module records + notifications (starts empty at 0)
+  const liveActivityFeed = [
+    ...db.moduleRecords.slice(0, 8).map((rec) => ({
+      id: `feed-${rec.id}`,
+      title: `${rec.module.charAt(0).toUpperCase() + rec.module.slice(1)} record: ${rec.title}`,
+      subtitle: `${rec.referenceCode}${rec.subtitle ? ` · ${rec.subtitle}` : ''}`,
+      category: (rec.module === 'billing'
+        ? 'finance'
+        : rec.module === 'radiology'
+        ? 'radiology'
+        : rec.module === 'insurance'
+        ? 'insurance'
+        : rec.module === 'marketing' || rec.module === 'sales'
+        ? 'marketing'
+        : 'clinical') as 'finance' | 'radiology' | 'operations' | 'insurance' | 'marketing' | 'clinical',
+      timestamp: rec.createdAt,
+    })),
+    ...db.notifications.slice(0, 6).map((n) => ({
+      id: `notif-${n.id}`,
+      title: n.title,
+      subtitle: n.detail,
+      category: 'operations' as const,
+      timestamp: n.timestamp,
+    })),
+  ]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 6);
+
+  // Build Needs Your Attention dynamically from pending/flagged module records + pending tasks
+  const attentionItems = [
+    ...db.moduleRecords
+      .filter((r) => r.status === 'Pending Review' || r.status === 'Flagged')
+      .map((r) => ({
+        id: `att-${r.id}`,
+        title: `${r.title} (${r.status})`,
+        detail: `${r.referenceCode} · ${r.module}`,
+        actionLabel: 'Review' as const,
+        targetPath: `/dashboard/module/${r.module}`,
+        severity: (r.status === 'Flagged' ? 'red' : 'orange') as 'red' | 'orange' | 'blue',
+        timestamp: r.createdAt,
+      })),
+    ...db.tasks
+      .filter((t) => t.status !== 'Completed')
+      .map((t) => ({
+        id: `att-${t.id}`,
+        title: t.title,
+        detail: `${t.department} · ${t.assignedAgent}`,
+        actionLabel: 'View' as const,
+        targetPath: '/dashboard/operations?tab=workflows',
+        severity: (t.priority === 'Urgent' ? 'red' : 'blue') as 'red' | 'orange' | 'blue',
+        timestamp: new Date().toISOString(),
+      })),
+  ].slice(0, 6);
+
+  // 5-day Hospital Performance chart (starts at 0 and maps actual patient/admission counts)
+  const dayLabels: string[] = [];
+  const hospitalPerformance: Array<{ label: string; patients: number; admissions: number }> = [];
+  const daysBack = range === '7d' ? 7 : range === '90d' ? 30 : 5;
+  const step = range === '90d' ? 6 : 1;
+  for (let i = 4; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i * step);
+    const isoDay = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    dayLabels.push(label);
+    const pCount = db.patients.filter((p) => p.lastVisit === isoDay || (i === 0 && !p.lastVisit)).length;
+    const aCount = db.patients.filter(
+      (p) =>
+        (p.admissionStatus === 'Admitted' || p.admissionStatus === 'ICU Observation') &&
+        (p.lastVisit === isoDay || i === 0)
+    ).length;
+    hospitalPerformance.push({
+      label: daysBack > 0 ? label : label,
+      patients: pCount,
+      admissions: aCount,
+    });
+  }
 
   const slots = ['08:00', '10:00', '12:00', '14:00', '16:00'];
   const appointmentTrends = slots.map((slot) => {
@@ -642,13 +906,39 @@ function computeHospitalOverview(range: string, hospitalName: string) {
       bedOccupancyRate,
       avgWaitMinutes,
       totalAgentTasksCompleted,
+      aiAgentActivities,
     },
+    departmentIntelligence: {
+      patients: totalPatients,
+      appointments: todaysAppointments,
+      admissions: activeAdmissions,
+      radiology: radiologyCount,
+      laboratory: laboratoryCount,
+      pharmacy: pharmacyCount,
+    },
+    needsAttentionSummary: {
+      pendingInsuranceApproval: db.moduleRecords.filter(
+        (r) => r.module === 'insurance' && (r.status === 'Pending Review' || r.status === 'Flagged')
+      ).length,
+      reportsAwaitingReview: db.moduleRecords.filter(
+        (r) =>
+          (r.module === 'radiology' || r.module === 'laboratory') &&
+          (r.status === 'Pending Review' || r.status === 'Flagged')
+      ).length,
+      appointmentsConfirmationRequired: db.appointments.filter((a) => a.status === 'Scheduled').length,
+    },
+    orchestrationNodes,
+    liveActivityFeed,
+    attentionItems,
+    hospitalPerformance,
     appointmentTrends,
     patientFlowStages,
     departments: db.departments,
     agents: db.agents,
     tasks: db.tasks,
     notifications: db.notifications,
+    workflowExecutions: db.workflowExecutions.slice(0, 20),
+    departmentalAlerts: db.departmentalAlerts.slice(0, 30),
   };
 }
 
@@ -694,28 +984,28 @@ async function startServer() {
     });
   });
 
-  // Login
+  // Login (supports Work Email OR Hospital Application ID e.g. APP-2026-1001)
   app.post('/api/auth/login', async (req, res) => {
     const { email, password, rememberMe } = req.body ?? {};
-    const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const cleanIdentifier = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const rawPassword = typeof password === 'string' ? password : '';
 
-    if (!cleanEmail || !rawPassword) {
-      res.status(400).json({ error: 'Email and password are required.' });
+    if (!cleanIdentifier || !rawPassword) {
+      res.status(400).json({ error: 'Work email or Application ID and password are required.' });
       return;
     }
 
     const ttlSeconds = rememberMe ? 7 * 24 * 3600 : 8 * 3600;
     const envAdmin = getEnvAdminCredentials();
 
-    if (envAdmin && cleanEmail === envAdmin.email) {
+    if (envAdmin && cleanIdentifier === envAdmin.email) {
       const a = Buffer.from(rawPassword);
       const b = Buffer.from(envAdmin.password);
       const match = a.length === b.length && crypto.timingSafeEqual(a, b);
       if (!match) {
-        appendAudit(cleanEmail, 'unknown', 'LOGIN_FAILED', 'auth/login', 'Denied');
+        appendAudit(cleanIdentifier, 'unknown', 'LOGIN_FAILED', 'auth/login', 'Denied');
         saveDatabase(db);
-        res.status(401).json({ error: 'Invalid email or password.' });
+        res.status(401).json({ error: 'Invalid credentials.' });
         return;
       }
 
@@ -748,24 +1038,29 @@ async function startServer() {
       return;
     }
 
-    const user = db.users.find((u) => u.email.toLowerCase() === cleanEmail);
+    const user = db.users.find(
+      (u) =>
+        u.email.toLowerCase() === cleanIdentifier ||
+        (u.applicationId && u.applicationId.toLowerCase() === cleanIdentifier) ||
+        (u.hospitalId && u.hospitalId.toLowerCase() === cleanIdentifier)
+    );
     if (!user) {
-      appendAudit(cleanEmail, 'unknown', 'LOGIN_FAILED', 'auth/login', 'Denied');
+      appendAudit(cleanIdentifier, 'unknown', 'LOGIN_FAILED', 'auth/login', 'Denied');
       saveDatabase(db);
-      res.status(401).json({ error: 'Invalid email or password.' });
+      res.status(401).json({ error: 'Invalid email / Application ID or password.' });
       return;
     }
 
     const valid = await verifyPassword(rawPassword, user.passwordHash);
     if (!valid) {
-      appendAudit(cleanEmail, user.role, 'LOGIN_FAILED', 'auth/login', 'Denied');
+      appendAudit(user.email, user.role, 'LOGIN_FAILED', 'auth/login', 'Denied');
       saveDatabase(db);
-      res.status(401).json({ error: 'Invalid email or password.' });
+      res.status(401).json({ error: 'Invalid email / Application ID or password.' });
       return;
     }
 
     if (user.status === 'suspended') {
-      appendAudit(cleanEmail, user.role, 'LOGIN_SUSPENDED_BLOCKED', 'auth/login', 'Denied');
+      appendAudit(user.email, user.role, 'LOGIN_SUSPENDED_BLOCKED', 'auth/login', 'Denied');
       saveDatabase(db);
       res.status(403).json({ error: 'This workspace is currently suspended. Contact CareOS platform governance.' });
       return;
@@ -785,6 +1080,39 @@ async function startServer() {
     saveDatabase(db);
     const { passwordHash: _omitted, ...safeUser } = user;
     res.json({ token, user: safeUser });
+  });
+
+  // First-login default password change for newly onboarded hospitals
+  app.post('/api/auth/change-default-password', requireAuth, async (req: AuthenticatedRequest, res) => {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
+      res.status(400).json({ error: 'Current password and new password are required.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+      return;
+    }
+    if (newPassword === currentPassword) {
+      res.status(400).json({ error: 'New password must be different from your default onboarding password.' });
+      return;
+    }
+    const dbUser = db.users.find((u) => u.id === req.authUser!.sub || u.email.toLowerCase() === req.authUser!.email.toLowerCase());
+    if (!dbUser) {
+      res.status(404).json({ error: 'Account record not found.' });
+      return;
+    }
+    const ok = await verifyPassword(currentPassword, dbUser.passwordHash);
+    if (!ok) {
+      res.status(401).json({ error: 'Current default password is incorrect.' });
+      return;
+    }
+    dbUser.passwordHash = await hashPassword(newPassword);
+    dbUser.mustChangePassword = false;
+    appendAudit(dbUser.email, dbUser.role, 'FIRST_LOGIN_PASSWORD_CHANGED', dbUser.applicationId || dbUser.email, 'Allowed');
+    saveDatabase(db);
+    const { passwordHash: _omitted, ...safeUser } = dbUser;
+    res.json({ ok: true, user: safeUser });
   });
 
   // Signup: creates coordinator user ('pending' onboarding) + real Hospital Application for Super Admin review!
@@ -1074,14 +1402,7 @@ async function startServer() {
     const hspSeq = String(1 + db.hospitals.length).padStart(5, '0');
     const hospitalId = `HSP-${hspSeq}`;
 
-    // Activate any linked applicant user
-    const linkedUsers = db.users.filter(
-      (u) => u.id === appRecord.applicantUserId || u.email.toLowerCase() === appRecord.email.toLowerCase()
-    );
-    linkedUsers.forEach((u) => {
-      u.status = 'active';
-      u.hospitalId = hospitalId;
-    });
+    const { createdDefaultAccount } = provisionHospitalWorkspaceDefaults(appRecord, hospitalId);
 
     const approvedHospital: ApprovedHospital = {
       id: `hsp-${crypto.randomUUID().slice(0, 8)}`,
@@ -1096,7 +1417,7 @@ async function startServer() {
       phone: appRecord.phone,
       bedsCount: appRecord.bedsCount,
       departmentsCount: appRecord.departmentsCount,
-      activeUsersCount: Math.max(linkedUsers.length, 1),
+      activeUsersCount: 1,
       subscriptionPlan: plan,
       workspaceStatus: 'Active',
       approvedAt: new Date().toISOString(),
@@ -1115,15 +1436,6 @@ async function startServer() {
       startedAt: new Date().toISOString(),
     };
     db.subscriptions.unshift(sub);
-
-    // Provision default departments & beds for the hospital ecosystem if empty
-    if (db.departments.length === 0) {
-      db.departments = [
-        { id: 'dept-cardio', name: 'Cardiology', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.2)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
-        { id: 'dept-er', name: 'Emergency', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(10, Math.round(appRecord.bedsCount * 0.15)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
-        { id: 'dept-gen', name: 'General Medicine', head: appRecord.contactPerson, activePatients: 0, staffOnDuty: 0, totalStaff: 0, bedCapacity: Math.max(20, Math.round(appRecord.bedsCount * 0.4)), occupiedBeds: 0, avgWaitMinutes: 0, status: 'Nominal' },
-      ];
-    }
 
     const complianceAgent = db.agents.find((a) => a.id === 'agent-compliance');
     if (complianceAgent) {
@@ -1149,7 +1461,15 @@ async function startServer() {
     appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_APPROVED', `${hospitalId} (${appRecord.hospitalName})`, 'Allowed');
     saveDatabase(db);
 
-    res.json({ application: appRecord, hospital: approvedHospital, subscription: sub });
+    res.json({
+      application: appRecord,
+      hospital: approvedHospital,
+      subscription: sub,
+      provisionedLogin: {
+        username: appRecord.applicationId,
+        usesDefaultPassword: createdDefaultAccount,
+      },
+    });
   });
 
   // Direct Admin Onboarding of a Hospital
@@ -1174,8 +1494,10 @@ async function startServer() {
     if (req.body?.autoApprove) {
       appRecord.status = 'Approved';
       appRecord.reviewedAt = new Date().toISOString();
+      appRecord.documents = appRecord.documents.map((d) => ({ ...d, status: 'Verified' }));
       const chosenPlan: SubscriptionPlan = plan === 'Starter' || plan === 'Pro' ? plan : 'Enterprise';
       const hospitalId = `HSP-${String(1 + db.hospitals.length).padStart(5, '0')}`;
+      const { createdDefaultAccount } = provisionHospitalWorkspaceDefaults(appRecord, hospitalId);
       const hsp: ApprovedHospital = {
         id: `hsp-${crypto.randomUUID().slice(0, 8)}`,
         hospitalId,
@@ -1209,7 +1531,14 @@ async function startServer() {
       appendPlatformActivity(`Hospital onboarded directly: ${hsp.hospitalName}`, 'approval');
       appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_DIRECT_ONBOARD', hospitalId, 'Allowed');
       saveDatabase(db);
-      res.status(201).json({ application: appRecord, hospital: hsp });
+      res.status(201).json({
+        application: appRecord,
+        hospital: hsp,
+        provisionedLogin: {
+          username: appRecord.applicationId,
+          usesDefaultPassword: createdDefaultAccount,
+        },
+      });
       return;
     }
     appendAudit(req.authUser!.email, 'admin', 'HOSPITAL_APPLICATION_CREATED', appRecord.applicationId, 'Allowed');
@@ -1287,6 +1616,590 @@ async function startServer() {
   app.get('/api/dashboard/overview', requireAuth, (req: AuthenticatedRequest, res) => {
     const range = typeof req.query.range === 'string' ? req.query.range : 'today';
     res.json(computeHospitalOverview(range, req.authUser!.hospitalName));
+  });
+
+  app.post('/api/hospital/command', requireAuth, (req: AuthenticatedRequest, res) => {
+    const rawPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    const prompt = rawPrompt || "Prepare today's hospital operational report.";
+    const overview = computeHospitalOverview('today', req.authUser!.hospitalName);
+
+    const billingPending = db.moduleRecords.filter(
+      (r) => r.module === 'billing' && (r.status === 'Pending Review' || r.status === 'Flagged')
+    ).length;
+    const billingTotal = db.moduleRecords.filter((r) => r.module === 'billing').length;
+    const labCount = overview.departmentIntelligence.laboratory;
+    const radCount = overview.departmentIntelligence.radiology;
+
+    const steps = [
+      {
+        agentName: 'Hospital Intelligence Agent',
+        detail: `Synced ${overview.metrics.totalPatients} patients & ${overview.metrics.availableBeds}/${overview.metrics.totalBeds} beds.`,
+        status: 'completed' as const,
+      },
+      {
+        agentName: 'Finance Agent',
+        detail: `Reviewed ${billingTotal} billing entries (${billingPending} pending review).`,
+        status: 'completed' as const,
+      },
+      {
+        agentName: 'Patient Operations Agent',
+        detail: `Checked ${overview.metrics.todaysAppointments} appointments & ${overview.metrics.activeAdmissions} admissions.`,
+        status: 'completed' as const,
+      },
+      {
+        agentName: 'Radiology Agent',
+        detail: `Audited ${radCount} radiology & ${labCount} lab orders (${overview.needsAttentionSummary.reportsAwaitingReview} awaiting review).`,
+        status: 'completed' as const,
+      },
+    ];
+
+    const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    for (const agent of db.agents.slice(0, 4)) {
+      agent.assignedTasks += 1;
+      agent.completedTasks += 1;
+      agent.recentActivity.unshift({
+        id: `act-${crypto.randomUUID().slice(0, 6)}`,
+        timestamp: nowTime,
+        summary: `Command: ${prompt}`,
+        department: agent.category,
+        outcome: 'Completed',
+      });
+      if (agent.recentActivity.length > 10) agent.recentActivity = agent.recentActivity.slice(0, 10);
+    }
+
+    appendNotification(
+      'Operational report compiled',
+      `${prompt} · ${overview.metrics.todaysAppointments} appointments, ${overview.needsAttentionSummary.reportsAwaitingReview} pending reports`,
+      'Intelligence Core',
+      'info'
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'HOSPITAL_COMMAND_EXECUTED', prompt, 'Allowed');
+    saveDatabase(db);
+
+    const lower = prompt.toLowerCase();
+    const reportTitle = lower.includes('insurance')
+      ? 'Insurance & Claims Clearance Brief'
+      : lower.includes('appointment')
+      ? 'Appointments Confirmation Brief'
+      : lower.includes('department')
+      ? 'Department Capacity & Performance Brief'
+      : "Today's Hospital Operational Report";
+
+    res.json({
+      result: {
+        id: `cmd-${crypto.randomUUID().slice(0, 8)}`,
+        prompt,
+        response: "On it. I've coordinated the relevant departments.",
+        reportTitle,
+        generatedAt: new Date().toISOString(),
+        steps,
+        summaryLines: [
+          { label: 'Hospital Workspace', value: overview.hospitalSettings.hospitalName },
+          { label: 'Total Patients Registered', value: String(overview.metrics.totalPatients) },
+          { label: "Today's Appointments", value: String(overview.metrics.todaysAppointments) },
+          { label: 'Active Inpatient Admissions', value: String(overview.metrics.activeAdmissions) },
+          { label: 'Available Beds', value: `${overview.metrics.availableBeds} / ${overview.metrics.totalBeds}` },
+          { label: 'Pending Insurance Approvals', value: String(overview.needsAttentionSummary.pendingInsuranceApproval) },
+          { label: 'Reports Awaiting Clinician Review', value: String(overview.needsAttentionSummary.reportsAwaitingReview) },
+          { label: 'Appointments Confirmation Required', value: String(overview.needsAttentionSummary.appointmentsConfirmationRequired) },
+        ],
+      },
+    });
+  });
+
+  // ==========================================================
+  // GEMINI MULTI-AGENT ORCHESTRATION ENGINE
+  // ==========================================================
+  app.post('/api/hospital/orchestrate', requireAuth, async (req: AuthenticatedRequest, res) => {
+    const rawInstruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : '';
+    if (!rawInstruction) {
+      res.status(400).json({ error: 'Please enter or speak an instruction for CareOS.' });
+      return;
+    }
+
+    const apiKey = (
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.API_KEY ||
+      ''
+    ).trim();
+    if (!apiKey) {
+      res.status(503).json({
+        error: 'Gemini API key is not configured on the server. Add GEMINI_API_KEY in Settings > Secrets to enable AI orchestration.',
+      });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const overview = computeHospitalOverview('today', req.authUser!.hospitalName);
+
+    const snapshot = {
+      hospitalName: overview.hospitalSettings.hospitalName,
+      humanOversightRequired: overview.hospitalSettings.humanOversightRequired,
+      metrics: overview.metrics,
+      needsAttentionSummary: overview.needsAttentionSummary,
+      patientsSample: db.patients.slice(0, 15).map((p) => ({
+        mrn: p.mrn,
+        fullName: p.fullName,
+        department: p.department,
+        admissionStatus: p.admissionStatus,
+        wardBed: p.wardBed,
+      })),
+      appointmentsSample: db.appointments.slice(0, 15).map((a) => ({
+        patientName: a.patientName,
+        department: a.department,
+        doctorName: a.doctorName,
+        date: a.date,
+        time: a.time,
+        status: a.status,
+      })),
+      departments: db.departments.map((d) => ({
+        name: d.name,
+        occupiedBeds: d.occupiedBeds,
+        bedCapacity: d.bedCapacity,
+        status: d.status,
+      })),
+      moduleRecordsByType: {
+        billing: db.moduleRecords.filter((r) => r.module === 'billing').slice(0, 10),
+        radiology: db.moduleRecords.filter((r) => r.module === 'radiology').slice(0, 10),
+        laboratory: db.moduleRecords.filter((r) => r.module === 'laboratory').slice(0, 10),
+        pharmacy: db.moduleRecords.filter((r) => r.module === 'pharmacy').slice(0, 10),
+        insurance: db.moduleRecords.filter((r) => r.module === 'insurance').slice(0, 10),
+        inventory: db.moduleRecords.filter((r) => r.module === 'inventory').slice(0, 10),
+        sales: db.moduleRecords.filter((r) => r.module === 'sales').slice(0, 10),
+        marketing: db.moduleRecords.filter((r) => r.module === 'marketing').slice(0, 10),
+      },
+      connectedExternalSystems: db.integrations.filter((i) => i.connected).map((i) => i.name),
+    };
+
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: JSON.stringify({
+          administratorInstruction: rawInstruction,
+          liveHospitalSnapshot: snapshot,
+        }),
+        config: {
+          systemInstruction:
+            'You are CareOS Intelligence, the central orchestrator of an AI-native Hospital Intelligence Operating System. ' +
+            'Analyze the administratorInstruction against the liveHospitalSnapshot and coordinate ONLY the relevant specialized departmental agents from: ' +
+            '"finance", "radiology", "operations", "insurance", "sales", "marketing". ' +
+            'Never activate all 6 agents unless the instruction genuinely requires every department. ' +
+            'Rules: ' +
+            '1) Ground every finding strictly in liveHospitalSnapshot. If a module or patient count is 0, accurately state 0—never fabricate patient names, dollar amounts, or clinical facts not in the snapshot. ' +
+            '2) Generate an ordered chain of interAgentMessages showing agents passing context to each other (using keys "core", "finance", "radiology", "operations", "insurance", "sales", "marketing"). ' +
+            '3) Never claim an external system (HIS/EMR/insurer) was modified if connectedExternalSystems is empty; label internal CareOS coordination clearly and mark sensitive clinical/financial/discharge actions in pendingApprovals for human administrator approval. ' +
+            '4) Keep inter-agent messages concise (under 18 words each) and voiceConfirmation under 20 words.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              intentSummary: { type: Type.STRING },
+              selectedAgents: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              voiceConfirmation: { type: Type.STRING },
+              executiveBrief: { type: Type.STRING },
+              reportTitle: { type: Type.STRING },
+              interAgentMessages: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    fromKey: { type: Type.STRING },
+                    toKey: { type: Type.STRING },
+                    fromAgent: { type: Type.STRING },
+                    toAgent: { type: Type.STRING },
+                    department: { type: Type.STRING },
+                    message: { type: Type.STRING },
+                    status: { type: Type.STRING },
+                  },
+                },
+              },
+              departmentalAlerts: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    department: { type: Type.STRING },
+                    agentName: { type: Type.STRING },
+                    summary: { type: Type.STRING },
+                    priority: { type: Type.STRING },
+                    requiresApproval: { type: Type.BOOLEAN },
+                  },
+                },
+              },
+              pendingApprovals: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    department: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    actionType: { type: Type.STRING },
+                  },
+                },
+              },
+              reportSections: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    items: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          label: { type: Type.STRING },
+                          value: { type: Type.STRING },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const parsed = JSON.parse((response.text ?? '{}').trim()) as {
+        intentSummary?: string;
+        selectedAgents?: string[];
+        voiceConfirmation?: string;
+        executiveBrief?: string;
+        reportTitle?: string;
+        interAgentMessages?: Array<{
+          fromKey?: string;
+          toKey?: string;
+          fromAgent?: string;
+          toAgent?: string;
+          department?: string;
+          message?: string;
+          status?: string;
+        }>;
+        departmentalAlerts?: Array<{
+          department?: string;
+          agentName?: string;
+          summary?: string;
+          priority?: string;
+          requiresApproval?: boolean;
+        }>;
+        pendingApprovals?: Array<{
+          title?: string;
+          department?: string;
+          description?: string;
+          actionType?: string;
+        }>;
+        reportSections?: Array<{
+          title?: string;
+          items?: Array<{ label?: string; value?: string }>;
+        }>;
+      };
+
+      const validKeys: OrchestratorAgentKey[] = ['finance', 'radiology', 'operations', 'insurance', 'sales', 'marketing'];
+      const selectedAgents = (parsed.selectedAgents ?? [])
+        .map((k) => k.toLowerCase().trim() as OrchestratorAgentKey)
+        .filter((k): k is OrchestratorAgentKey => validKeys.includes(k));
+      const uniqueAgents: OrchestratorAgentKey[] =
+        selectedAgents.length > 0 ? Array.from(new Set(selectedAgents)) : ['operations', 'finance'];
+
+      const workflowId = `wf-${crypto.randomUUID().slice(0, 8)}`;
+      const workflowCode = `WF-${new Date().getFullYear()}-${1001 + db.workflowExecutions.length}`;
+      const nowIso = new Date().toISOString();
+
+      const deptRouteMap = (dept: string): string => {
+        const d = dept.toLowerCase();
+        if (d.includes('insur') || d.includes('discharge')) return '/dashboard/module/insurance';
+        if (d.includes('rad') || d.includes('imag')) return '/dashboard/module/radiology';
+        if (d.includes('fin') || d.includes('bill')) return '/dashboard/module/billing';
+        if (d.includes('pharm')) return '/dashboard/module/pharmacy';
+        if (d.includes('lab')) return '/dashboard/module/laboratory';
+        if (d.includes('sale')) return '/dashboard/module/sales';
+        if (d.includes('market')) return '/dashboard/module/marketing';
+        if (d.includes('bed') || d.includes('resour')) return '/dashboard/resources';
+        if (d.includes('appoint')) return '/dashboard/appointments';
+        return '/dashboard/patients';
+      };
+
+      const interAgentMessages: InterAgentMessage[] = (parsed.interAgentMessages ?? []).map((m, idx) => {
+        const fk = (m.fromKey || 'core').toLowerCase() as OrchestratorAgentKey | 'core';
+        const tk = (m.toKey || 'core').toLowerCase() as OrchestratorAgentKey | 'core';
+        return {
+          id: `msg-${crypto.randomUUID().slice(0, 6)}`,
+          step: idx + 1,
+          fromAgent: m.fromAgent || 'CareOS Intelligence',
+          toAgent: m.toAgent || 'Department Agent',
+          fromKey: fk === 'core' || validKeys.includes(fk) ? fk : 'core',
+          toKey: tk === 'core' || validKeys.includes(tk) ? tk : 'core',
+          department: m.department || 'Operations',
+          message: m.message || 'Coordinating operational check.',
+          status:
+            m.status === 'warning' || m.status === 'pending_approval' ? m.status : 'completed',
+          timestamp: nowIso,
+        };
+      });
+
+      const departmentalAlerts: DepartmentAlertItem[] = (parsed.departmentalAlerts ?? []).map((al) => ({
+        id: `alt-${crypto.randomUUID().slice(0, 8)}`,
+        workflowId,
+        workflowCode,
+        department: al.department || 'Hospital Operations',
+        agentName: al.agentName || 'CareOS Agent',
+        summary: al.summary || 'Action requested from CareOS orchestration.',
+        priority: al.priority === 'Urgent' || al.priority === 'High' ? al.priority : 'Normal',
+        timestamp: nowIso,
+        status: 'Delivered (In-App)',
+        targetPath: deptRouteMap(al.department || ''),
+        requiresApproval: Boolean(al.requiresApproval),
+      }));
+
+      const pendingApprovals: PendingApprovalItem[] = (parsed.pendingApprovals ?? []).map((pa) => ({
+        id: `apr-${crypto.randomUUID().slice(0, 8)}`,
+        title: pa.title || 'Administrator Sign-off',
+        department: pa.department || 'Hospital Governance',
+        description: pa.description || 'Review CareOS recommendation before finalizing.',
+        actionType:
+          pa.actionType === 'clinical' ||
+          pa.actionType === 'financial' ||
+          pa.actionType === 'insurance' ||
+          pa.actionType === 'discharge'
+            ? pa.actionType
+            : 'clinical',
+        approved: false,
+      }));
+
+      const reportSections = (parsed.reportSections ?? []).map((sec) => ({
+        title: sec.title || 'Operational Summary',
+        items: (sec.items ?? []).map((it) => ({
+          label: it.label || 'Metric',
+          value: it.value || '0',
+        })),
+      }));
+
+      const execution: WorkflowExecutionRecord = {
+        id: workflowId,
+        workflowCode,
+        instruction: rawInstruction,
+        intentSummary: parsed.intentSummary || rawInstruction,
+        executedAt: nowIso,
+        executionMs: Date.now() - startedAt,
+        participatingAgents: uniqueAgents,
+        status: pendingApprovals.length > 0 ? 'Awaiting Approval' : 'Completed',
+        voiceConfirmation:
+          parsed.voiceConfirmation ||
+          `CareOS coordinated ${uniqueAgents.length} departments and compiled your operational report.`,
+        executiveBrief:
+          parsed.executiveBrief || 'CareOS Intelligence coordinated the selected departmental agents.',
+        interAgentMessages,
+        departmentalAlerts,
+        pendingApprovals,
+        reportTitle: parsed.reportTitle || 'CareOS Consolidated Operational Brief',
+        reportSections,
+      };
+
+      db.workflowExecutions.unshift(execution);
+      if (db.workflowExecutions.length > 50) db.workflowExecutions = db.workflowExecutions.slice(0, 50);
+
+      for (const alert of departmentalAlerts) {
+        db.departmentalAlerts.unshift(alert);
+        appendNotification(
+          `${alert.department} Alert`,
+          `${alert.workflowCode}: ${alert.summary}`,
+          alert.department,
+          alert.priority === 'Urgent' ? 'critical' : alert.priority === 'High' ? 'warning' : 'info'
+        );
+      }
+      if (db.departmentalAlerts.length > 80) db.departmentalAlerts = db.departmentalAlerts.slice(0, 80);
+
+      const agentMap: Record<OrchestratorAgentKey, string> = {
+        finance: 'agent-operations',
+        radiology: 'agent-clinical',
+        operations: 'agent-operations',
+        insurance: 'agent-compliance',
+        sales: 'agent-support',
+        marketing: 'agent-analytics',
+      };
+      const nowTime = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const touchedAgentIds = new Set(uniqueAgents.map((k) => agentMap[k]));
+      for (const ag of db.agents) {
+        if (touchedAgentIds.has(ag.id)) {
+          ag.assignedTasks += 1;
+          ag.completedTasks += 1;
+          ag.avgResponseSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(1));
+          ag.recentActivity.unshift({
+            id: `act-${crypto.randomUUID().slice(0, 6)}`,
+            timestamp: nowTime,
+            summary: `${workflowCode}: ${rawInstruction}`,
+            department: ag.category,
+            outcome: pendingApprovals.length > 0 ? 'Awaiting Review' : 'Completed',
+          });
+          if (ag.recentActivity.length > 10) ag.recentActivity = ag.recentActivity.slice(0, 10);
+        }
+      }
+
+      appendAudit(req.authUser!.email, req.authUser!.role, 'AGENTIC_ORCHESTRATION_EXECUTED', `${workflowCode}: ${rawInstruction}`, 'Allowed');
+      saveDatabase(db);
+      res.json({ execution });
+    } catch (err) {
+      let msg = err instanceof Error ? err.message : 'CareOS orchestration failed while calling Gemini.';
+      let upstreamCode: number | undefined;
+      try {
+        const parsedErr = JSON.parse(msg) as { error?: { code?: number; message?: string; status?: string } };
+        if (parsedErr?.error?.message) {
+          msg = parsedErr.error.message;
+          upstreamCode = parsedErr.error.code;
+        }
+      } catch {
+        // Leave original error message as-is
+      }
+      if (upstreamCode === 403 || msg.includes('PERMISSION_DENIED') || msg.includes('free tier')) {
+        msg = `${msg} Please select or attach a billing-enabled Gemini API key in Settings > Secrets.`;
+      } else if (upstreamCode === 429 || msg.includes('RESOURCE_EXHAUSTED')) {
+        msg = `${msg} Quota exceeded — check your Gemini API tier in Settings > Secrets.`;
+      }
+      appendAudit(req.authUser!.email, req.authUser!.role, 'AGENTIC_ORCHESTRATION_FAILED', rawInstruction, 'Denied');
+      saveDatabase(db);
+      res.status(upstreamCode === 429 ? 429 : 502).json({
+        error: msg,
+        upstreamStatus: upstreamCode ?? 502,
+      });
+    }
+  });
+
+  app.post('/api/hospital/workflows/:id/approve', requireAuth, (req: AuthenticatedRequest, res) => {
+    const wf = db.workflowExecutions.find((w) => w.id === req.params.id);
+    if (!wf) {
+      res.status(404).json({ error: 'Workflow execution not found.' });
+      return;
+    }
+    const { approvalId } = req.body ?? {};
+    const target = wf.pendingApprovals.find((p) => p.id === approvalId);
+    if (!target) {
+      res.status(404).json({ error: 'Approval item not found.' });
+      return;
+    }
+    target.approved = true;
+    target.approvedAt = new Date().toISOString();
+    target.approvedBy = req.authUser!.name;
+    if (wf.pendingApprovals.every((p) => p.approved)) {
+      wf.status = 'Completed';
+    }
+    appendAudit(req.authUser!.email, req.authUser!.role, 'WORKFLOW_ITEM_APPROVED', `${wf.workflowCode} · ${target.title}`, 'Allowed');
+    saveDatabase(db);
+    res.json({ execution: wf });
+  });
+
+  app.patch('/api/hospital/alerts/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+    const alert = db.departmentalAlerts.find((a) => a.id === req.params.id);
+    if (!alert) {
+      res.status(404).json({ error: 'Department alert not found.' });
+      return;
+    }
+    const nextStatus = req.body?.status;
+    if (nextStatus === 'Acknowledged' || nextStatus === 'Approved') {
+      alert.status = nextStatus;
+      appendAudit(req.authUser!.email, req.authUser!.role, `ALERT_${nextStatus.toUpperCase()}`, `${alert.workflowCode} · ${alert.department}`, 'Allowed');
+      saveDatabase(db);
+    }
+    res.json({ alert });
+  });
+
+  app.patch('/api/hospital/voice-settings', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (typeof req.body?.voiceResponsesEnabled === 'boolean') {
+      db.hospitalSettings.voiceResponsesEnabled = req.body.voiceResponsesEnabled;
+      appendAudit(
+        req.authUser!.email,
+        req.authUser!.role,
+        'VOICE_PREFERENCE_UPDATED',
+        String(db.hospitalSettings.voiceResponsesEnabled),
+        'Allowed'
+      );
+      saveDatabase(db);
+    }
+    res.json({ voiceResponsesEnabled: db.hospitalSettings.voiceResponsesEnabled });
+  });
+
+  app.get('/api/hospital/modules/:module', requireAuth, (req, res) => {
+    const mod = req.params.module as HospitalModuleKey;
+    const validModules: HospitalModuleKey[] = [
+      'radiology',
+      'laboratory',
+      'pharmacy',
+      'billing',
+      'insurance',
+      'inventory',
+      'sales',
+      'marketing',
+    ];
+    if (!validModules.includes(mod)) {
+      res.status(400).json({ error: 'Unknown hospital module.' });
+      return;
+    }
+    res.json({ records: db.moduleRecords.filter((r) => r.module === mod) });
+  });
+
+  app.post('/api/hospital/modules/:module', requireAuth, (req: AuthenticatedRequest, res) => {
+    const mod = req.params.module as HospitalModuleKey;
+    const { title, subtitle, status, amountOrCount } = req.body ?? {};
+    if (!title || !String(title).trim()) {
+      res.status(400).json({ error: 'Title is required.' });
+      return;
+    }
+    const prefixMap: Record<HospitalModuleKey, string> = {
+      radiology: 'RAD',
+      laboratory: 'LAB',
+      pharmacy: 'RX',
+      billing: 'INV',
+      insurance: 'CLM',
+      inventory: 'SKU',
+      sales: 'CRM',
+      marketing: 'CMP',
+    };
+    const rec: HospitalModuleRecord = {
+      id: `mod-${crypto.randomUUID().slice(0, 8)}`,
+      module: mod,
+      referenceCode: `${prefixMap[mod] || 'REC'}-${1001 + db.moduleRecords.length}`,
+      title: String(title).trim(),
+      subtitle: String(subtitle || '').trim(),
+      status:
+        status === 'Pending Review' || status === 'Completed' || status === 'Flagged' ? status : 'Active',
+      amountOrCount: amountOrCount ? String(amountOrCount).trim() : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    db.moduleRecords.unshift(rec);
+    appendNotification(
+      `${mod.charAt(0).toUpperCase() + mod.slice(1)} entry created`,
+      `${rec.referenceCode} · ${rec.title}`,
+      mod,
+      rec.status === 'Flagged' ? 'warning' : 'info'
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, `MODULE_${mod.toUpperCase()}_CREATED`, rec.referenceCode, 'Allowed');
+    saveDatabase(db);
+    res.status(201).json({ record: rec });
+  });
+
+  app.patch('/api/hospital/modules/:module/:id', requireAuth, (req: AuthenticatedRequest, res) => {
+    const rec = db.moduleRecords.find((r) => r.id === req.params.id && r.module === req.params.module);
+    if (!rec) {
+      res.status(404).json({ error: 'Record not found.' });
+      return;
+    }
+    const nextStatus = req.body?.status;
+    if (nextStatus && ['Active', 'Pending Review', 'Completed', 'Flagged'].includes(nextStatus)) {
+      rec.status = nextStatus;
+      appendAudit(req.authUser!.email, req.authUser!.role, 'MODULE_RECORD_UPDATED', rec.referenceCode, 'Allowed');
+      saveDatabase(db);
+    }
+    res.json({ record: rec });
   });
 
   app.get('/api/patients', requireAuth, (_req, res) => {
@@ -1615,6 +2528,10 @@ async function startServer() {
     appendAudit(req.authUser!.email, 'admin', 'PLATFORM_SETTINGS_UPDATED', 'system-settings', 'Allowed');
     saveDatabase(db);
     res.json({ hospitalSettings: db.hospitalSettings });
+  });
+
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
   });
 
   if (process.env.NODE_ENV !== 'production') {

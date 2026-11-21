@@ -11,6 +11,7 @@ export interface AuthUser {
   applicationId?: string;
   contactNumber: string;
   status: 'active' | 'pending' | 'suspended';
+  mustChangePassword?: boolean;
   createdAt: string;
 }
 
@@ -260,12 +261,34 @@ export interface SuperAdminOverviewData {
   };
 }
 
+export type HospitalModuleKey =
+  | 'radiology'
+  | 'laboratory'
+  | 'pharmacy'
+  | 'billing'
+  | 'insurance'
+  | 'inventory'
+  | 'sales'
+  | 'marketing';
+
+export interface HospitalModuleRecord {
+  id: string;
+  module: HospitalModuleKey;
+  referenceCode: string;
+  title: string;
+  subtitle: string;
+  status: 'Active' | 'Pending Review' | 'Completed' | 'Flagged';
+  amountOrCount?: string;
+  createdAt: string;
+}
+
 export interface DashboardOverviewData {
   hospitalSettings: {
     hospitalName: string;
     timezone: string;
     humanOversightRequired: boolean;
     sessionTimeoutMinutes: number;
+    voiceResponsesEnabled: boolean;
   };
   metrics: {
     totalPatients: number;
@@ -277,11 +300,146 @@ export interface DashboardOverviewData {
     bedOccupancyRate: number;
     avgWaitMinutes: number;
     totalAgentTasksCompleted: number;
+    aiAgentActivities: number;
   };
+  departmentIntelligence: {
+    patients: number;
+    appointments: number;
+    admissions: number;
+    radiology: number;
+    laboratory: number;
+    pharmacy: number;
+  };
+  needsAttentionSummary: {
+    pendingInsuranceApproval: number;
+    reportsAwaitingReview: number;
+    appointmentsConfirmationRequired: number;
+  };
+  orchestrationNodes: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    side: 'left' | 'right';
+    status: 'Active' | 'Processing' | 'Standby';
+    tasksCount: number;
+    department: string;
+  }>;
+  liveActivityFeed: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    category: 'finance' | 'radiology' | 'operations' | 'insurance' | 'marketing' | 'clinical';
+    timestamp: string;
+  }>;
+  attentionItems: Array<{
+    id: string;
+    title: string;
+    detail: string;
+    actionLabel: 'Review' | 'Assign' | 'View';
+    targetPath: string;
+    severity: 'red' | 'orange' | 'blue';
+    timestamp: string;
+  }>;
+  hospitalPerformance: Array<{
+    label: string;
+    patients: number;
+    admissions: number;
+  }>;
   appointmentTrends: Array<{ label: string; scheduled: number; completed: number; walkIn: number }>;
   patientFlowStages: Array<{ stage: string; count: number; avgMinutes: number }>;
   departments: DepartmentRecord[];
   agents: AgentProfile[];
   tasks: OperationalTask[];
   notifications: HospitalNotification[];
+  workflowExecutions: WorkflowExecutionRecord[];
+  departmentalAlerts: DepartmentAlertItem[];
 }
+
+export type OrchestratorAgentKey =
+  | 'finance'
+  | 'radiology'
+  | 'operations'
+  | 'insurance'
+  | 'sales'
+  | 'marketing';
+
+export interface InterAgentMessage {
+  id: string;
+  step: number;
+  fromAgent: string;
+  toAgent: string;
+  fromKey: OrchestratorAgentKey | 'core';
+  toKey: OrchestratorAgentKey | 'core';
+  department: string;
+  message: string;
+  status: 'completed' | 'warning' | 'pending_approval';
+  timestamp: string;
+}
+
+export interface DepartmentAlertItem {
+  id: string;
+  workflowId: string;
+  workflowCode: string;
+  department: string;
+  agentName: string;
+  summary: string;
+  priority: 'Normal' | 'High' | 'Urgent';
+  timestamp: string;
+  status: 'Delivered (In-App)' | 'Acknowledged' | 'Approved';
+  targetPath: string;
+  requiresApproval: boolean;
+}
+
+export interface PendingApprovalItem {
+  id: string;
+  title: string;
+  department: string;
+  description: string;
+  actionType: 'clinical' | 'financial' | 'insurance' | 'discharge';
+  approved: boolean;
+  approvedAt?: string;
+  approvedBy?: string;
+}
+
+export interface ConsolidatedReportSection {
+  title: string;
+  items: Array<{ label: string; value: string }>;
+}
+
+export interface WorkflowExecutionRecord {
+  id: string;
+  workflowCode: string;
+  instruction: string;
+  intentSummary: string;
+  executedAt: string;
+  executionMs: number;
+  participatingAgents: OrchestratorAgentKey[];
+  status: 'Completed' | 'Awaiting Approval' | 'Issue Detected';
+  voiceConfirmation: string;
+  executiveBrief: string;
+  interAgentMessages: InterAgentMessage[];
+  departmentalAlerts: DepartmentAlertItem[];
+  pendingApprovals: PendingApprovalItem[];
+  reportTitle: string;
+  reportSections: ConsolidatedReportSection[];
+  errorMessage?: string;
+}
+
+export interface HospitalCommandResult {
+  id: string;
+  prompt: string;
+  response: string;
+  reportTitle: string;
+  generatedAt: string;
+  steps: Array<{
+    agentName: string;
+    detail: string;
+    status: 'completed';
+  }>;
+  summaryLines: Array<{
+    label: string;
+    value: string;
+  }>;
+}
+
+

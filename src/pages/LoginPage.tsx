@@ -24,7 +24,7 @@ export function LoginPage() {
     e.preventDefault();
     setError(null);
     if (!email.trim() || !password) {
-      setError('Please enter both your work email address and password.');
+      setError('Please enter your work email or Application ID and password.');
       return;
     }
     setLoading(true);
@@ -32,7 +32,7 @@ export function LoginPage() {
       await login(email.trim(), password, rememberMe);
       navigate('/dashboard', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid email or password.');
+      setError(err instanceof Error ? err.message : 'Invalid credentials.');
     } finally {
       setLoading(false);
     }
@@ -70,7 +70,7 @@ export function LoginPage() {
                 Welcome back
               </h1>
               <p className="mt-1 text-sm text-[#71839C]">
-                Sign in to your CareOS workspace.
+                Sign in with your Application ID or work email.
               </p>
             </div>
 
@@ -83,19 +83,19 @@ export function LoginPage() {
             <form onSubmit={handleLogin} className="mt-6 space-y-4" noValidate>
               <div>
                 <label htmlFor="login-email" className="block text-xs font-semibold text-[#102653]">
-                  Work email address
+                  Work email or Application ID
                 </label>
                 <div className="relative mt-1.5">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
                   <input
                     id="login-email"
-                    type="email"
-                    autoComplete="email"
+                    type="text"
+                    autoComplete="username"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="h-11 w-full rounded-lg border border-[#E3EDF6] bg-white pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="you@hospital.com"
+                    placeholder="you@hospital.com or APP-2026-1001"
                   />
                 </div>
               </div>

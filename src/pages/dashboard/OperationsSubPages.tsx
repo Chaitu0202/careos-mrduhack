@@ -843,56 +843,117 @@ export function SettingsAdminPage() {
             </form>
           </div>
 
-          {user?.role === 'admin' && (
-            <div className="lg:col-span-5 rounded-2xl border border-[#E3EDF6] bg-white p-6">
-              <div className="flex items-center gap-2 border-b border-[#E3EDF6] pb-3">
-                <Shield className="h-4 w-4 text-[#3299F5]" />
-                <h2 className="font-display text-base font-bold text-[#102653]">Rotate Super Admin Password</h2>
+          <div className="lg:col-span-5 space-y-6">
+            <VoicePreferenceCard />
+
+            {user?.role === 'admin' && (
+              <div className="rounded-2xl border border-[#E3EDF6] bg-white p-6">
+                <div className="flex items-center gap-2 border-b border-[#E3EDF6] pb-3">
+                  <Shield className="h-4 w-4 text-[#3299F5]" />
+                  <h2 className="font-display text-base font-bold text-[#102653]">Rotate Super Admin Password</h2>
+                </div>
+
+                {pwMsg && (
+                  <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700">
+                    {pwMsg}
+                  </div>
+                )}
+                {pwErr && (
+                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+                    {pwErr}
+                  </div>
+                )}
+
+                <form onSubmit={handleRotatePassword} className="mt-4 space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-medium text-[#102653]">Current Password</label>
+                    <input
+                      type="password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#102653]">New Password (min 8 chars)</label>
+                    <input
+                      type="password"
+                      required
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-[#102653] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#1b3a78]"
+                  >
+                    Update Password
+                  </button>
+                </form>
               </div>
-
-              {pwMsg && (
-                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-700">
-                  {pwMsg}
-                </div>
-              )}
-              {pwErr && (
-                <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
-                  {pwErr}
-                </div>
-              )}
-
-              <form onSubmit={handleRotatePassword} className="mt-4 space-y-3.5">
-                <div>
-                  <label className="block text-xs font-medium text-[#102653]">Current Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#102653]">New Password (min 8 chars)</label>
-                  <input
-                    type="password"
-                    required
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="mt-1 h-10 w-full rounded-xl border border-[#E3EDF6] px-3 text-sm"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-[#102653] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#1b3a78]"
-                >
-                  Update Password
-                </button>
-              </form>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </DashboardLayout>
   );
 }
+
+function VoicePreferenceCard() {
+  const { apiFetch } = useAuth();
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ hospitalSettings: { voiceResponsesEnabled?: boolean } }>('/api/dashboard/overview?range=today')
+      .then((res) => {
+        if (typeof res.hospitalSettings.voiceResponsesEnabled === 'boolean') {
+          setVoiceEnabled(res.hospitalSettings.voiceResponsesEnabled);
+        }
+      })
+      .catch(() => {});
+  }, [apiFetch]);
+
+  const handleToggle = async (nextVal: boolean) => {
+    setVoiceEnabled(nextVal);
+    setSaving(true);
+    setStatusMsg(null);
+    try {
+      await apiFetch('/api/hospital/voice-settings', {
+        method: 'PATCH',
+        body: JSON.stringify({ voiceResponsesEnabled: nextVal }),
+      });
+      setStatusMsg(nextVal ? 'Spoken confirmations enabled.' : 'Spoken confirmations muted.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-[#E3EDF6] bg-white p-6">
+      <div className="flex items-center gap-2 border-b border-[#E3EDF6] pb-3">
+        <Sliders className="h-4 w-4 text-[#3299F5]" />
+        <h2 className="font-display text-base font-bold text-[#102653]">CareOS Voice Assistant</h2>
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-[#71839C]">
+        Control whether CareOS speaks short voice confirmations via SpeechSynthesis after completing major hospital
+        orchestrations.
+      </p>
+      <label className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[#E3EDF6] bg-[#F7FAFF] px-4 py-3 text-xs font-semibold text-[#102653] cursor-pointer">
+        <span>Speak workflow confirmations &amp; critical alerts</span>
+        <input
+          type="checkbox"
+          checked={voiceEnabled}
+          disabled={saving}
+          onChange={(e) => handleToggle(e.target.checked)}
+          className="h-4 w-4 rounded border-[#E3EDF6] text-[#3299F5]"
+        />
+      </label>
+      {statusMsg && <div className="mt-2.5 text-[11px] font-medium text-[#3299F5]">{statusMsg}</div>}
+    </div>
+  );
+}
+

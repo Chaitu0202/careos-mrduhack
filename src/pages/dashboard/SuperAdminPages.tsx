@@ -306,15 +306,31 @@ function OnboardHospitalModal({
   const [autoApprove, setAutoApprove] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    hospitalName: string;
+    applicationId: string;
+    hospitalId?: string;
+    usesDefaultPassword: boolean;
+  } | null>(null);
 
   if (!open) return null;
+
+  const handleClose = () => {
+    setCreatedCredentials(null);
+    setErr(null);
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
     setSubmitting(true);
     try {
-      await apiFetch('/api/super-admin/hospitals/manual', {
+      const res = await apiFetch<{
+        application: HospitalApplication;
+        hospital?: ApprovedHospital | null;
+        provisionedLogin?: { username: string; usesDefaultPassword: boolean } | null;
+      }>('/api/super-admin/hospitals/manual', {
         method: 'POST',
         body: JSON.stringify({
           hospitalName,
@@ -330,6 +346,7 @@ function OnboardHospitalModal({
           autoApprove,
         }),
       });
+      const submittedName = hospitalName;
       setHospitalName('');
       setLocation('');
       setAddress('');
@@ -337,7 +354,16 @@ function OnboardHospitalModal({
       setEmail('');
       setPhone('');
       onSuccess();
-      onClose();
+      if (res.provisionedLogin?.username) {
+        setCreatedCredentials({
+          hospitalName: submittedName,
+          applicationId: res.provisionedLogin.username,
+          hospitalId: res.hospital?.hospitalId,
+          usesDefaultPassword: res.provisionedLogin.usesDefaultPassword,
+        });
+      } else {
+        handleClose();
+      }
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Failed to onboard hospital.');
     } finally {
@@ -350,16 +376,57 @@ function OnboardHospitalModal({
       <div className="w-full max-w-xl rounded-2xl border border-[#E3EDF6] bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-[#E3EDF6] pb-3.5">
           <div>
-            <h2 className="font-display text-lg font-bold text-[#102653]">Onboard Hospital</h2>
-            <p className="text-xs text-[#71839C]">Create a hospital onboarding record or provision workspace immediately.</p>
+            <h2 className="font-display text-lg font-bold text-[#102653]">
+              {createdCredentials ? 'Hospital Workspace Provisioned' : 'Onboard Hospital'}
+            </h2>
+            <p className="text-xs text-[#71839C]">
+              {createdCredentials
+                ? 'Share the Application ID username below with the hospital administrator.'
+                : 'Create a hospital onboarding record or provision workspace immediately.'}
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-[#71839C] hover:bg-[#F4F9FF]">
+          <button type="button" onClick={handleClose} className="rounded-lg p-1.5 text-[#71839C] hover:bg-[#F4F9FF]">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {err && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
 
+        {createdCredentials ? (
+          <div className="mt-5 space-y-4">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-950">
+              <div className="flex items-center gap-2 font-semibold text-emerald-800">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                {createdCredentials.hospitalName} is now active
+                {createdCredentials.hospitalId ? ` (${createdCredentials.hospitalId})` : ''}
+              </div>
+              <p className="mt-1.5 text-emerald-800">
+                The hospital administrator can sign in immediately using their Application ID as the username.
+              </p>
+            </div>
+            <div className="rounded-xl border border-[#E3EDF6] bg-[#F7FAFF] p-4 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[#71839C]">Login Username (App ID)</span>
+                <span className="font-mono font-bold text-sm text-[#102653]">{createdCredentials.applicationId}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[#71839C]">Initial Password</span>
+                <span className="font-mono font-semibold text-[#3299F5]">
+                  {createdCredentials.usesDefaultPassword ? 'password (reset required on first login)' : 'User-configured password'}
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded-lg bg-[#3299F5] px-5 py-2 text-xs font-semibold text-white hover:bg-[#2383db]"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
@@ -490,7 +557,7 @@ function OnboardHospitalModal({
           <div className="flex items-center justify-end gap-3 border-t border-[#E3EDF6] pt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="rounded-lg border border-[#E3EDF6] px-4 py-2 text-xs font-semibold text-[#102653] hover:bg-[#F4F9FF]"
             >
               Cancel
@@ -504,6 +571,7 @@ function OnboardHospitalModal({
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );
@@ -928,15 +996,20 @@ export function HospitalApplicationsPage() {
     setProcessing(true);
     setActionMsg(null);
     try {
-      const res = await apiFetch<{ hospital: ApprovedHospital }>(
-        `/api/super-admin/applications/${selectedApp.applicationId}/approve`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ plan: chosenPlan }),
-        }
-      );
+      const res = await apiFetch<{
+        hospital: ApprovedHospital;
+        provisionedLogin?: { username: string; usesDefaultPassword: boolean };
+      }>(`/api/super-admin/applications/${selectedApp.applicationId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ plan: chosenPlan }),
+      });
       setApproveModalOpen(false);
-      setActionMsg(`Approved! Provisioned ${res.hospital.hospitalId} on the ${chosenPlan} plan.`);
+      const loginInfo = res.provisionedLogin?.username
+        ? ` Login Username: ${res.provisionedLogin.username}${
+            res.provisionedLogin.usesDefaultPassword ? ' (initial password: password)' : ''
+          }.`
+        : '';
+      setActionMsg(`Approved! Provisioned ${res.hospital.hospitalId} on the ${chosenPlan} plan.${loginInfo}`);
       await loadData();
     } finally {
       setProcessing(false);

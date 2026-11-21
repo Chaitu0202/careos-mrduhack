@@ -26,6 +26,7 @@ import {
   ResourcesPage,
   SettingsAdminPage,
 } from './pages/dashboard/OperationsSubPages';
+import { HospitalModulePage } from './pages/dashboard/HospitalModulePage';
 import {
   AuditLogsPage,
   HospitalApplicationsPage,
@@ -219,6 +220,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SettingsAdminPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/module/:module"
+            element={
+              <ProtectedRoute>
+                <HospitalModulePage />
               </ProtectedRoute>
             }
           />
