@@ -846,6 +846,29 @@ function HospitalCommandCenter() {
           </div>
         </section>
 
+        {/* Quick workspace administration entry point right after sign-in */}
+        <section className="mx-auto w-full max-w-4xl">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#DCEBFA] bg-[#F7FBFF] px-5 py-3.5">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[#EAF5FF] text-[#218AEF]">
+                <Users className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-[#102653]">Need to add a department or a team member?</div>
+                <div className="text-[11px] text-[#71839C]">
+                  Provision staff with generated User IDs and a temporary password they can change.
+                </div>
+              </div>
+            </div>
+            <Link
+              to="/dashboard/manage"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-[#DCEBFA] bg-white px-3.5 text-[11.5px] font-semibold text-[#218AEF] hover:border-[#218AEF]"
+            >
+              Manage workspace <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </section>
+
         {/* SECTION C & D: Large Natural-Language & Voice Instruction Bar + Suggested Prompts */}
         <section className="mx-auto w-full max-w-4xl rounded-2xl border border-[#DCEBFA] bg-white p-4 sm:p-5 shadow-[0_8px_28px_rgba(33,138,239,0.07)]">
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   Banknote,
@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
+  Clock,
   CreditCard,
   FileText,
   GitBranch,
@@ -40,6 +41,7 @@ import {
 import { CareOSLogo } from './CareOSLogo';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import type { AuthUser } from '../types/careos';
 
 interface SidebarItem {
   label: string;
@@ -54,6 +56,7 @@ const SUPER_ADMIN_NAV: SidebarItem[] = [
   { label: 'Hospital Directory', to: '/dashboard/directory', icon: Building2 },
   { label: 'Approved Hospitals', to: '/dashboard/approved', icon: CheckCircle2 },
   { label: 'User Management', to: '/dashboard/users', icon: Users },
+  { label: 'User & Department Mgmt', to: '/dashboard/manage', icon: UserCog },
   { label: 'Subscriptions & Billing', to: '/dashboard/billing', icon: CreditCard },
   { label: 'AI Agent Monitoring', to: '/dashboard/agents', icon: Bot },
   { label: 'Platform Analytics', to: '/dashboard/analytics', icon: BarChart3 },
@@ -69,6 +72,7 @@ const HOSPITAL_NAV_GROUPS: Array<{ title: string; items: SidebarItem[] }> = [
       { label: 'Home', to: '/dashboard', icon: Home, end: true },
       { label: 'Patients', to: '/dashboard/patients', icon: Users },
       { label: 'Appointments', to: '/dashboard/appointments', icon: Calendar },
+      { label: 'Doctor Queue', to: '/dashboard/doctor-queue', icon: Clock },
       { label: 'Doctors & Staff', to: '/dashboard/departments?view=staff', icon: Stethoscope },
       { label: 'Departments', to: '/dashboard/departments', icon: LayoutGrid },
     ],
@@ -76,7 +80,7 @@ const HOSPITAL_NAV_GROUPS: Array<{ title: string; items: SidebarItem[] }> = [
   {
     title: 'HOSPITAL',
     items: [
-      { label: 'Radiology', to: '/dashboard/module/radiology', icon: Scan },
+      { label: 'Radiology', to: '/dashboard/radiology', icon: Scan },
       { label: 'Finance & Billing', to: '/dashboard/module/billing', icon: Banknote },
       { label: 'Insurance & Discharge', to: '/dashboard/module/insurance', icon: ShieldCheck },
       { label: 'Beds & Resources', to: '/dashboard/resources', icon: BedDouble },
@@ -102,7 +106,7 @@ const HOSPITAL_NAV_GROUPS: Array<{ title: string; items: SidebarItem[] }> = [
   {
     title: 'SETTINGS',
     items: [
-      { label: 'User Management', to: '/dashboard/departments?view=roles', icon: UserCog },
+      { label: 'Manage Users & Departments', to: '/dashboard/manage', icon: UserCog },
       { label: 'Settings', to: '/dashboard/settings', icon: Settings },
     ],
   },
@@ -133,6 +137,202 @@ function HospitalMiniThumb() {
       <rect x="44" y="27" width="7" height="6" rx="1" fill="#CBE7FE" />
       <rect x="27" y="29" width="10" height="11" rx="1" fill="#EAF5FF" />
     </svg>
+  );
+}
+
+interface SwitchTarget {
+  id: string;
+  label: string;
+  path: string;
+  /** Persona to switch to before navigating. Omit for public pages. */
+  persona?: string;
+  icon: typeof Home;
+}
+
+const SWITCH_GROUPS: Array<{ title: string; items: SwitchTarget[] }> = [
+  {
+    title: 'WORKSPACES',
+    items: [
+      { id: 'platform', label: 'Super Admin Console', path: '/dashboard', persona: 'usr-super-admin', icon: ShieldCheck },
+      { id: 'hospital', label: 'Hospital Command Center', path: '/dashboard', persona: 'usr-test-hospital', icon: Home },
+      { id: 'manage', label: 'User & Department Mgmt', path: '/dashboard/manage', persona: 'usr-test-hospital', icon: UserCog },
+    ],
+  },
+  {
+    title: 'HOSPITAL OPERATIONS',
+    items: [
+      { id: 'patients', label: 'Patients', path: '/dashboard/patients', persona: 'usr-test-hospital', icon: Users },
+      { id: 'appointments', label: 'Appointments', path: '/dashboard/appointments', persona: 'usr-test-hospital', icon: Calendar },
+      { id: 'doctor-queue', label: 'Doctor Queue', path: '/dashboard/doctor-queue', persona: 'usr-test-hospital', icon: Clock },
+      { id: 'radiology', label: 'Radiology Workspace', path: '/dashboard/radiology', persona: 'usr-test-hospital', icon: Scan },
+      { id: 'departments', label: 'Departments & Staff', path: '/dashboard/departments', persona: 'usr-test-hospital', icon: LayoutGrid },
+      { id: 'resources', label: 'Beds & Resources', path: '/dashboard/resources', persona: 'usr-test-hospital', icon: BedDouble },
+      { id: 'agents', label: 'AI Agents', path: '/dashboard/agents', persona: 'usr-test-hospital', icon: Sparkles },
+      { id: 'workflows', label: 'Workflows', path: '/dashboard/operations?tab=workflows', persona: 'usr-test-hospital', icon: GitBranch },
+      { id: 'analytics', label: 'Reports & Analytics', path: '/dashboard/analytics', persona: 'usr-test-hospital', icon: BarChart3 },
+      { id: 'integrations', label: 'Integrations', path: '/dashboard/integrations', persona: 'usr-test-hospital', icon: Puzzle },
+    ],
+  },
+  {
+    title: 'PLATFORM ADMINISTRATION',
+    items: [
+      { id: 'apps', label: 'Hospital Applications', path: '/dashboard/applications', persona: 'usr-super-admin', icon: ClipboardCheck },
+      { id: 'directory', label: 'Hospital Directory', path: '/dashboard/directory', persona: 'usr-super-admin', icon: Building2 },
+      { id: 'approved', label: 'Approved Hospitals', path: '/dashboard/approved', persona: 'usr-super-admin', icon: CheckCircle2 },
+      { id: 'users', label: 'User Management', path: '/dashboard/users', persona: 'usr-super-admin', icon: Users },
+      { id: 'billing', label: 'Subscriptions & Billing', path: '/dashboard/billing', persona: 'usr-super-admin', icon: CreditCard },
+      { id: 'audit', label: 'Audit Logs', path: '/dashboard/audit-logs', persona: 'usr-super-admin', icon: Shield },
+    ],
+  },
+  {
+    title: 'PUBLIC SITE',
+    items: [{ id: 'site', label: 'CareOS Website', path: '/', icon: Home }],
+  },
+];
+
+/** Low-contrast top-bar control that swaps the active session and lands on the chosen dashboard. */
+function DashboardSwitcher() {
+  const { user, switchWorkspace, apiFetch } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [provisioned, setProvisioned] = useState<AuthUser[]>([]);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onOutsideClick = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    apiFetch<{ users: AuthUser[] }>('/api/hospital/users')
+      .then((res) => setProvisioned(res.users.filter((u) => u.demoSwitchable && u.id !== 'usr-super-admin').slice(0, 12)))
+      .catch(() => {});
+  }, [open, apiFetch]);
+
+  const goTo = async (target: SwitchTarget) => {
+    setError(null);
+    setOpen(false);
+    if (target.persona && target.persona !== user?.id) {
+      setSwitching(target.label);
+      try {
+        await switchWorkspace(target.persona);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to switch dashboard.');
+        setSwitching(null);
+        return;
+      }
+      setSwitching(null);
+    }
+    navigate(target.path);
+  };
+
+  const groups: Array<{ title: string; items: SwitchTarget[] }> = [...SWITCH_GROUPS];
+  const staffAccounts = provisioned.filter((u) => u.role !== 'patient');
+  const patientAccounts = provisioned.filter((u) => u.role === 'patient');
+  if (staffAccounts.length > 0) {
+    groups.splice(2, 0, {
+      title: 'PROVISIONED ACCOUNTS',
+      items: staffAccounts.map((u) => ({
+        id: u.id,
+        label: u.fullName,
+        path: '/dashboard',
+        persona: u.id,
+        icon: UserCog,
+      })),
+    });
+  }
+  if (patientAccounts.length > 0) {
+    groups.splice(staffAccounts.length > 0 ? 3 : 2, 0, {
+      title: 'PATIENT PORTALS',
+      items: patientAccounts.map((u) => ({
+        id: u.id,
+        label: `${u.fullName} (Patient)`,
+        path: '/patient-portal',
+        persona: u.id,
+        icon: Users,
+      })),
+    });
+  }
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label="Switch dashboard"
+        aria-expanded={open}
+        title="Switch dashboard"
+        className={cn(
+          'inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[10.5px] font-medium transition-colors',
+          open ? 'bg-[#EAF5FF] text-[#3299F5]' : 'text-[#71839C] hover:bg-[#F4F9FF] hover:text-[#3299F5]'
+        )}
+      >
+        <LayoutGrid className="h-3 w-3" />
+        <span className="hidden sm:inline">Views</span>
+        <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-2 max-h-[70vh] w-[292px] overflow-y-auto rounded-2xl border border-[#DCEBFA] bg-white p-2 shadow-xl">
+          <div className="border-b border-[#E3EDF6] px-2.5 pb-2 pt-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[#71839C]">Instant dashboard access</div>
+            <div className="mt-0.5 text-[10.5px] text-[#4F627D]">No re-login required</div>
+          </div>
+          {groups.map((group) => (
+            <div key={group.title} className="pt-2">
+              <div className="px-2.5 pb-1 text-[9.5px] font-bold uppercase tracking-wider text-[#9AAAC0]">
+                {group.title}
+              </div>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = item.path === '/dashboard' && item.persona === user?.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => goTo(item)}
+                      className={cn(
+                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[11.5px] transition-colors',
+                        active
+                          ? 'bg-[#EAF5FF] font-semibold text-[#3299F5]'
+                          : 'font-medium text-[#334663] hover:bg-[#F4F9FF] hover:text-[#102653]'
+                      )}
+                    >
+                      <Icon className={cn('h-3.5 w-3.5 shrink-0', active ? 'text-[#3299F5]' : 'text-[#71839C]')} />
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {switching && (
+        <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full border border-[#D7E9FB] bg-white px-4 py-2 text-[11px] font-semibold text-[#102653] shadow-lg">
+          Opening {switching}…
+        </div>
+      )}
+      {error && (
+        <div className="fixed bottom-4 right-4 z-[60] max-w-sm rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700 shadow-lg">
+          {error}
+          <button type="button" onClick={() => setError(null)} className="ml-3 font-bold">
+            ×
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -434,6 +634,7 @@ export function DashboardLayout({
                   )}
                 </div>
               )}
+              <DashboardSwitcher />
             </div>
 
             {!isPendingApplicant && (
@@ -618,7 +819,7 @@ export function DashboardLayout({
                     {initials}
                   </span>
                   <span className="hidden sm:inline max-w-[140px] truncate text-xs font-semibold text-[#102653]">
-                    {isAdmin ? user?.fullName || 'Super Admin' : 'Hospital Administrator'}
+                    {user?.fullName || (isAdmin ? 'Super Admin' : 'Hospital Administrator')}
                   </span>
                   <ChevronDown className="h-3.5 w-3.5 text-[#71839C]" />
                 </button>

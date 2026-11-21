@@ -5,7 +5,7 @@ import { CareOSLogo } from '../components/CareOSLogo';
 import { useAuth } from '../context/AuthContext';
 
 export function LoginPage() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, user, login } = useAuth();
   const navigate = useNavigate();
 
   const [email, setEmail] = useState('');
@@ -17,20 +17,20 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={user?.role === 'patient' ? '/patient-portal' : '/dashboard'} replace />;
   }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!email.trim() || !password) {
-      setError('Please enter your work email or Application ID and password.');
+      setError('Please enter your email, Application ID, or patient portal ID and password.');
       return;
     }
     setLoading(true);
     try {
-      await login(email.trim(), password, rememberMe);
-      navigate('/dashboard', { replace: true });
+      const signedInUser = await login(email.trim(), password, rememberMe);
+      navigate(signedInUser.role === 'patient' ? '/patient-portal' : '/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid credentials.');
     } finally {
@@ -70,7 +70,7 @@ export function LoginPage() {
                 Welcome back
               </h1>
               <p className="mt-1 text-sm text-[#71839C]">
-                Sign in with your Application ID or work email.
+                Sign in with your Application ID, work email, or patient portal ID.
               </p>
             </div>
 
@@ -83,7 +83,7 @@ export function LoginPage() {
             <form onSubmit={handleLogin} className="mt-6 space-y-4" noValidate>
               <div>
                 <label htmlFor="login-email" className="block text-xs font-semibold text-[#102653]">
-                  Work email or Application ID
+                  Email / Application ID / Patient ID
                 </label>
                 <div className="relative mt-1.5">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#71839C]" />
@@ -95,7 +95,7 @@ export function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="h-11 w-full rounded-lg border border-[#E3EDF6] bg-white pl-10 pr-3.5 text-sm text-[#172B4D] placeholder:text-[#71839C]/70 focus:border-[#3299F5] focus:outline-none"
-                    placeholder="you@hospital.com or APP-2026-1001"
+                    placeholder="you@hospital.com, APP-2026-1001, or PAT-2026-0001"
                   />
                 </div>
               </div>

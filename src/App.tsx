@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import type { UserRole } from './types/careos';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { HomePage } from './pages/HomePage';
 import {
@@ -12,12 +13,15 @@ import {
   SolutionsPage,
 } from './pages/PublicPages';
 import { LoginPage } from './pages/LoginPage';
+import { PatientPortalPage } from './pages/PatientPortalPage';
 import { SignupPage } from './pages/SignupPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { CommandCenterPage } from './pages/dashboard/CommandCenterPage';
 import { AgentsHubPage } from './pages/dashboard/AgentsHubPage';
 import { PatientsPage } from './pages/dashboard/PatientsPage';
 import { AppointmentsPage } from './pages/dashboard/AppointmentsPage';
+import { DoctorQueuePage } from './pages/dashboard/DoctorQueuePage';
+import { RadiologyWorkspacePage } from './pages/dashboard/RadiologyWorkspacePage';
 import {
   AnalyticsPage,
   DepartmentsPage,
@@ -27,6 +31,7 @@ import {
   SettingsAdminPage,
 } from './pages/dashboard/OperationsSubPages';
 import { HospitalModulePage } from './pages/dashboard/HospitalModulePage';
+import { WorkspaceManagementPage } from './pages/dashboard/WorkspaceManagementPage';
 import {
   AuditLogsPage,
   HospitalApplicationsPage,
@@ -52,10 +57,24 @@ function ScrollManager() {
   return null;
 }
 
-function ProtectedRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
+function ProtectedRoute({
+  children,
+  adminOnly = false,
+  role,
+}: {
+  children: React.ReactNode;
+  adminOnly?: boolean;
+  role?: UserRole;
+}) {
   const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+  if (user?.role === 'patient' && role !== 'patient') {
+    return <Navigate to="/patient-portal" replace />;
+  }
+  if (role && user?.role !== role) {
+    return <Navigate to={user?.role === 'patient' ? '/patient-portal' : '/dashboard'} replace />;
   }
   if (adminOnly && user?.role !== 'admin') {
     return <Navigate to="/dashboard" replace />;
@@ -83,6 +102,16 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
+          {/* Patient Portal */}
+          <Route
+            path="/patient-portal"
+            element={
+              <ProtectedRoute role="patient">
+                <PatientPortalPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Super Admin Platform Routes */}
           <Route
@@ -152,6 +181,14 @@ export default function App() {
 
           {/* Shared / Hospital Operations Routes */}
           <Route
+            path="/dashboard/manage"
+            element={
+              <ProtectedRoute>
+                <WorkspaceManagementPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/dashboard/agents"
             element={
               <ProtectedRoute>
@@ -172,6 +209,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppointmentsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/doctor-queue"
+            element={
+              <ProtectedRoute>
+                <DoctorQueuePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/radiology"
+            element={
+              <ProtectedRoute>
+                <RadiologyWorkspacePage />
               </ProtectedRoute>
             }
           />

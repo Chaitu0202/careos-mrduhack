@@ -14,6 +14,7 @@ import type {
   AuthUser,
   DepartmentAlertItem,
   DepartmentRecord,
+  DoctorQueueItem,
   HospitalApplication,
   HospitalModuleKey,
   HospitalModuleRecord,
@@ -22,9 +23,14 @@ import type {
   InterAgentMessage,
   OperationalTask,
   OrchestratorAgentKey,
+  PatientBillRecord,
+  PatientPortalCredentials,
+  PatientPortalData,
   PatientRecord,
   PendingApprovalItem,
   PlatformActivityItem,
+  PrescriptionRecord,
+  RadiologyOrderRecord,
   ResourceItem,
   StaffMember,
   SubscriptionPlan,
@@ -53,6 +59,9 @@ interface CareOSDatabase {
   };
   patients: PatientRecord[];
   appointments: AppointmentRecord[];
+  prescriptions: PrescriptionRecord[];
+  radiologyOrders: RadiologyOrderRecord[];
+  bills: PatientBillRecord[];
   departments: DepartmentRecord[];
   resources: ResourceItem[];
   agents: AgentProfile[];
@@ -110,6 +119,94 @@ const SESSION_SECRET =
     )
     .digest('hex');
 const revokedTokens = new Map<string, number>();
+
+// Default credential issued by administrators when they provision a workspace user.
+// Every such account is created with mustChangePassword = true.
+const DEFAULT_TEMP_PASSWORD = 'password';
+
+/** Deterministic, human-readable IDs such as USR-2026-0007 / DEP-2026-0003. */
+function nextSequentialCode(prefix: string, existing: string[]): string {
+  const year = new Date().getFullYear();
+  const pattern = new RegExp(`^${prefix}-${year}-(\\d{4})$`);
+  const max = existing.reduce((highest, code) => {
+    const match = pattern.exec(code);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+  return `${prefix}-${year}-${String(max + 1).padStart(4, '0')}`;
+}
+
+async function createManagedUser(
+  targetDb: CareOSDatabase,
+  input: {
+    fullName: string;
+    email: string;
+    role: Exclude<UserRole, 'patient'>;
+    department?: string;
+    contactNumber?: string;
+    hospitalName: string;
+    hospitalId?: string;
+    applicationId?: string;
+  }
+): Promise<StoredUser> {
+  const username = nextSequentialCode('USR', targetDb.users.map((u) => u.username || ''));
+  const user: StoredUser = {
+    id: `usr-${crypto.randomUUID().slice(0, 8)}`,
+    username,
+    fullName: input.fullName,
+    email: input.email,
+    role: input.role,
+    hospitalName: input.hospitalName,
+    hospitalType: 'Multi-Specialty',
+    hospitalId: input.hospitalId,
+    applicationId: input.applicationId,
+    department: input.department,
+    contactNumber: input.contactNumber || 'Workspace Administrator',
+    status: 'active',
+    mustChangePassword: true,
+    demoSwitchable: true,
+    createdAt: new Date().toISOString(),
+    passwordHash: await hashPassword(DEFAULT_TEMP_PASSWORD),
+  };
+  targetDb.users.push(user);
+  return user;
+}
+
+/** Creates a patient-role login issued automatically when an appointment is booked. */
+async function createPatientPortalUser(
+  targetDb: CareOSDatabase,
+  input: {
+    fullName: string;
+    email: string;
+    patientId: string;
+    phone?: string;
+    hospitalName: string;
+    hospitalId?: string;
+    applicationId?: string;
+  }
+): Promise<StoredUser> {
+  const username = nextSequentialCode('PAT', targetDb.users.map((u) => u.username || ''));
+  const user: StoredUser = {
+    id: `usr-pat-${crypto.randomUUID().slice(0, 8)}`,
+    username,
+    fullName: input.fullName,
+    email: input.email,
+    role: 'patient',
+    patientId: input.patientId,
+    hospitalName: input.hospitalName,
+    hospitalType: 'Multi-Specialty',
+    hospitalId: input.hospitalId,
+    applicationId: input.applicationId,
+    contactNumber: input.phone || 'Patient Portal',
+    status: 'active',
+    mustChangePassword: true,
+    // Enabled only for the local preview switcher; CAREOS_DEMO_SWITCH=false disables it globally.
+    demoSwitchable: true,
+    createdAt: new Date().toISOString(),
+    passwordHash: await hashPassword(DEFAULT_TEMP_PASSWORD),
+  };
+  targetDb.users.push(user);
+  return user;
+}
 
 function hashPassword(password: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -182,6 +279,8 @@ function getTodayDateString(): string {
 function createInitialDatabase(): CareOSDatabase {
   const seededAdmin: StoredUser = {
     id: 'usr-super-admin',
+    username: 'admin@gmail.com',
+    demoSwitchable: true,
     fullName: 'Super Admin',
     email: INITIAL_ADMIN_EMAIL,
     role: 'admin',
@@ -195,6 +294,8 @@ function createInitialDatabase(): CareOSDatabase {
 
   const seededTestHospital: StoredUser = {
     id: 'usr-test-hospital',
+    username: 'hospital@gmail.com',
+    demoSwitchable: true,
     fullName: 'Hospital Administrator',
     email: INITIAL_TEST_HOSPITAL_EMAIL,
     role: 'coordinator',
@@ -224,6 +325,9 @@ function createInitialDatabase(): CareOSDatabase {
     },
     patients: [],
     appointments: [],
+    prescriptions: [],
+    radiologyOrders: [],
+    bills: [],
     departments: [],
     resources: [],
     agents: [
@@ -452,6 +556,18 @@ function loadDatabase(): CareOSDatabase {
       parsed.moduleRecords = [];
       modified = true;
     }
+    if (!Array.isArray(parsed.prescriptions)) {
+      parsed.prescriptions = [];
+      modified = true;
+    }
+    if (!Array.isArray(parsed.radiologyOrders)) {
+      parsed.radiologyOrders = [];
+      modified = true;
+    }
+    if (!Array.isArray(parsed.bills)) {
+      parsed.bills = [];
+      modified = true;
+    }
     if (!Array.isArray(parsed.workflowExecutions)) {
       parsed.workflowExecutions = [];
       modified = true;
@@ -466,6 +582,17 @@ function loadDatabase(): CareOSDatabase {
         voiceResponsesEnabled: true,
       };
       modified = true;
+    }
+    // Backfill instant-switch metadata for the seeded demo personas.
+    for (const u of parsed.users) {
+      const isSeededPersona =
+        u.email.toLowerCase() === INITIAL_ADMIN_EMAIL ||
+        u.email.toLowerCase() === INITIAL_TEST_HOSPITAL_EMAIL;
+      if (isSeededPersona && (!u.demoSwitchable || !u.username)) {
+        u.demoSwitchable = true;
+        u.username = u.email.toLowerCase();
+        modified = true;
+      }
     }
     if (modified) {
       saveDatabase(parsed);
@@ -526,7 +653,13 @@ function appendPlatformActivity(message: string, category: PlatformActivityItem[
   }
 }
 
-function appendNotification(title: string, detail: string, department: string, severity: 'info' | 'warning' | 'critical' = 'info') {
+function appendNotification(
+  title: string,
+  detail: string,
+  department: string,
+  severity: 'info' | 'warning' | 'critical' = 'info',
+  recipient: { userId?: string; patientId?: string; orderId?: string } = {}
+) {
   db.notifications.unshift({
     id: `not-${crypto.randomUUID().slice(0, 8)}`,
     title,
@@ -535,10 +668,29 @@ function appendNotification(title: string, detail: string, department: string, s
     severity,
     timestamp: new Date().toISOString(),
     read: false,
+    ...recipient,
   });
   if (db.notifications.length > 50) {
     db.notifications = db.notifications.slice(0, 50);
   }
+}
+
+/** Live wait time in minutes from a queue/check-in timestamp. */
+function waitMinutesSince(timestamp?: string): number {
+  if (!timestamp) return 0;
+  const diff = Date.now() - new Date(timestamp).getTime();
+  return Number.isFinite(diff) ? Math.max(0, Math.floor(diff / 60000)) : 0;
+}
+
+/** Resolves the single patient a request is allowed to see. */
+function resolvePortalPatient(req: AuthenticatedRequest): PatientRecord | undefined {
+  const auth = req.authUser!;
+  if (auth.role === 'patient') {
+    const account = db.users.find((u) => u.id === auth.sub);
+    return db.patients.find((p) => p.id === account?.patientId || p.userId === account?.id);
+  }
+  const requested = typeof req.query.patientId === 'string' ? req.query.patientId : '';
+  return db.patients.find((p) => p.id === requested);
 }
 
 function getEnvAdminCredentials(): { email: string; password: string } | null {
@@ -988,6 +1140,23 @@ function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunctio
     return;
   }
   req.authUser = payload;
+
+  // Patient accounts are scoped strictly to their own portal data.
+  if (payload.role === 'patient') {
+    const patientAllowedPaths = [
+      '/api/auth/me',
+      '/api/auth/change-default-password',
+      '/api/auth/logout',
+      '/api/patient/portal',
+    ];
+    if (!patientAllowedPaths.includes(req.path)) {
+      appendAudit(payload.email, payload.role, 'PATIENT_SCOPE_ACCESS_DENIED', req.path, 'Denied');
+      saveDatabase(db);
+      res.status(403).json({ error: 'This area is not available to patient accounts.' });
+      return;
+    }
+  }
+
   next();
 }
 
@@ -1005,10 +1174,28 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
   next();
 }
 
+/** Super admins and active hospital workspace admins (coordinators) may provision their own workspace. */
+function requireWorkspaceManager(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.authUser) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+  const role = req.authUser.role;
+  const canManage = role === 'admin' || (role === 'coordinator' && req.authUser.status === 'active');
+  if (!canManage) {
+    appendAudit(req.authUser.email, role, 'WORKSPACE_MANAGEMENT_ACCESS_ATTEMPT', req.path, 'Denied');
+    saveDatabase(db);
+    res.status(403).json({ error: 'Workspace administrator privileges are required for this action.' });
+    return;
+  }
+  next();
+}
+
 export function createApiApp() {
   const app = express();
   app.set('trust proxy', 1);
-  app.use(express.json({ limit: '1mb' }));
+  // Local preview stores small clinical file attachments as JSON data URLs.
+  app.use(express.json({ limit: '8mb' }));
 
   app.get('/api/auth/admin-status', (_req, res) => {
     res.json({
@@ -1074,6 +1261,7 @@ export function createApiApp() {
     const user = db.users.find(
       (u) =>
         u.email.toLowerCase() === cleanIdentifier ||
+        (u.username && u.username.toLowerCase() === cleanIdentifier) ||
         (u.applicationId && u.applicationId.toLowerCase() === cleanIdentifier) ||
         (u.hospitalId && u.hospitalId.toLowerCase() === cleanIdentifier)
     );
@@ -1116,6 +1304,51 @@ export function createApiApp() {
     appendAudit(user.email, user.role, 'LOGIN_SUCCESS', 'auth/login', 'Allowed');
     saveDatabase(db);
     const { passwordHash: _omitted, ...safeUser } = user;
+    res.json({ token, user: safeUser });
+  });
+
+  // Instant workspace switching for demos. Issues a fresh session for a demo persona
+  // (seeded admin / hospital administrator / admin-created users) without a password.
+  // Set CAREOS_DEMO_SWITCH=false to disable this in a real deployment.
+  app.post('/api/auth/switch-workspace', requireAuth, (req: AuthenticatedRequest, res) => {
+    if (process.env.CAREOS_DEMO_SWITCH === 'false') {
+      res.status(403).json({ error: 'Instant workspace switching is disabled for this deployment.' });
+      return;
+    }
+    const targetId = typeof req.body?.targetId === 'string' ? req.body.targetId.trim() : '';
+    if (!targetId) {
+      res.status(400).json({ error: 'A target workspace is required.' });
+      return;
+    }
+    const normalized = targetId.toLowerCase();
+    const target = db.users.find(
+      (u) =>
+        u.id === targetId ||
+        u.email.toLowerCase() === normalized ||
+        (u.username && u.username.toLowerCase() === normalized)
+    );
+    if (!target || !target.demoSwitchable || target.status !== 'active') {
+      res.status(404).json({ error: 'That workspace is not available for instant switching.' });
+      return;
+    }
+
+    const token = signToken(
+      {
+        sub: target.id,
+        email: target.email,
+        name: target.fullName,
+        role: target.role,
+        hospitalName: target.hospitalName,
+        status: target.status,
+        applicationId: target.applicationId,
+        hospitalId: target.hospitalId,
+        hospitalType: target.hospitalType,
+      },
+      8 * 3600
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'DEMO_WORKSPACE_SWITCHED', target.email, 'Allowed');
+    saveDatabase(db);
+    const { passwordHash: _omitted, ...safeUser } = target;
     res.json({ token, user: safeUser });
   });
 
@@ -2297,29 +2530,123 @@ export function createApiApp() {
     res.json({ appointments: db.appointments });
   });
 
-  app.post('/api/appointments', requireAuth, (req: AuthenticatedRequest, res) => {
-    const { patientId, patientName, mrn, doctorName, department, date, time, type, notes } = req.body ?? {};
+  app.post('/api/appointments', requireAuth, async (req: AuthenticatedRequest, res) => {
+    const { patientId, patientName, patientEmail, phone, age, gender, mrn, doctorName, department, date, time, type, notes } =
+      req.body ?? {};
     if (!patientName || !doctorName || !department || !date || !time) {
       res.status(400).json({ error: 'Patient, doctor, department, date, and time are required.' });
       return;
     }
+
+    const caller = req.authUser!;
+    const cleanName = String(patientName).trim();
+    const cleanDoctor = String(doctorName).trim();
+    const cleanDepartment = String(department).trim();
+    const now = new Date().toISOString();
+    const allowedTypes: AppointmentRecord['type'][] = [
+      'Consultation',
+      'Follow-up',
+      'Diagnostic',
+      'Procedure',
+      'Telehealth',
+    ];
+    const appointmentType = allowedTypes.includes(type as AppointmentRecord['type'])
+      ? (type as AppointmentRecord['type'])
+      : 'Consultation';
+
+    // Reuse an existing patient when the same name/department is booked again.
+    let patient = db.patients.find((p) => p.id === patientId) ||
+      db.patients.find((p) => p.fullName.toLowerCase() === cleanName.toLowerCase() && p.department === cleanDepartment);
+
+    if (!patient) {
+      patient = {
+        id: `pat-${crypto.randomUUID().slice(0, 8)}`,
+        mrn: String(mrn || `MRN-${10001 + db.patients.length}`).trim(),
+        fullName: cleanName,
+        age: Number(age) > 0 ? Math.round(Number(age)) : 30,
+        gender: gender === 'Female' || gender === 'Male' || gender === 'Other' ? gender : 'Other',
+        phone: String(phone || '').trim() || 'Not provided',
+        email: String(patientEmail || '').trim().toLowerCase(),
+        department: cleanDepartment,
+        attendingDoctor: cleanDoctor,
+        admissionStatus: 'Outpatient',
+        wardBed: '—',
+        lastVisit: now,
+        medicalSummary: String(notes || '').trim(),
+        allergies: [],
+      };
+      db.patients.unshift(patient);
+    } else {
+      // Keep the assigned doctor current if this patient returns.
+      patient.attendingDoctor = cleanDoctor;
+      patient.lastVisit = now;
+    }
+
+    // Provision (or reuse) the patient's portal login.
+    let portalUser = patient.userId ? db.users.find((u) => u.id === patient!.userId) : undefined;
+    const portalAlreadyExisted = Boolean(portalUser);
+    if (!portalUser) {
+      const requestedEmail = String(patientEmail || '').trim().toLowerCase();
+      const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '') || 'patient';
+      let portalEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail)
+        ? requestedEmail
+        : `${slug}@patient.careos.local`;
+      let suffix = 1;
+      while (db.users.some((u) => u.email.toLowerCase() === portalEmail)) {
+        portalEmail = `${slug}.${suffix++}@patient.careos.local`;
+      }
+      portalUser = await createPatientPortalUser(db, {
+        fullName: cleanName,
+        email: portalEmail,
+        patientId: patient.id,
+        phone: patient.phone,
+        hospitalName: caller.hospitalName,
+        hospitalId: caller.hospitalId,
+        applicationId: caller.applicationId,
+      });
+      patient.userId = portalUser.id;
+      patient.portalUsername = portalUser.username;
+      patient.portalEmail = portalUser.email;
+    }
+
     const newApt: AppointmentRecord = {
       id: `apt-${crypto.randomUUID().slice(0, 6)}`,
-      patientId: String(patientId || 'pat-new'),
-      patientName: String(patientName).trim(),
-      mrn: String(mrn || 'MRN-NEW').trim(),
-      doctorName: String(doctorName).trim(),
-      department: String(department).trim(),
+      patientId: patient.id,
+      patientName: cleanName,
+      mrn: patient.mrn,
+      doctorName: cleanDoctor,
+      department: cleanDepartment,
       date: String(date).trim(),
       time: String(time).trim(),
-      type: type || 'Consultation',
+      type: appointmentType,
       status: 'Scheduled',
       notes: String(notes || '').trim(),
+      createdAt: now,
+      queueJoinedAt: now,
+      waitingMinutes: 0,
+      portalUserId: portalUser.id,
+      portalUsername: portalUser.username,
     };
     db.appointments.unshift(newApt);
-    appendAudit(req.authUser!.email, req.authUser!.role, 'APPOINTMENT_BOOKED', newApt.id, 'Allowed');
+
+    const portalCredentials: PatientPortalCredentials = {
+      userId: portalUser.username || portalUser.email,
+      email: portalUser.email,
+      mustChangePassword: Boolean(portalUser.mustChangePassword),
+      existing: portalAlreadyExisted,
+      ...(portalUser.mustChangePassword ? { password: DEFAULT_TEMP_PASSWORD } : {}),
+    };
+
+    appendAudit(caller.email, caller.role, 'APPOINTMENT_BOOKED', newApt.id, 'Allowed');
+    appendNotification(
+      'New patient appointment',
+      `${cleanName} · ${cleanDoctor} · ${newApt.date} at ${newApt.time}`,
+      cleanDepartment,
+      'info',
+      { userId: portalUser.id, patientId: patient.id }
+    );
     saveDatabase(db);
-    res.status(201).json({ appointment: newApt });
+    res.status(201).json({ appointment: newApt, patient, portalCredentials });
   });
 
   app.patch('/api/appointments/:id', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -2329,13 +2656,291 @@ export function createApiApp() {
       return;
     }
     const { status, date, time, notes } = req.body ?? {};
-    if (status) db.appointments[idx].status = status;
+    if (status) {
+      db.appointments[idx].status = status;
+      if (status === 'Checked In') {
+        db.appointments[idx].queueJoinedAt = db.appointments[idx].queueJoinedAt || new Date().toISOString();
+      }
+    }
     if (date) db.appointments[idx].date = String(date);
     if (time) db.appointments[idx].time = String(time);
     if (typeof notes === 'string') db.appointments[idx].notes = notes;
     appendAudit(req.authUser!.email, req.authUser!.role, `APPOINTMENT_${String(status || 'UPDATED').toUpperCase()}`, db.appointments[idx].id, 'Allowed');
     saveDatabase(db);
     res.json({ appointment: db.appointments[idx] });
+  });
+
+  // ---------------------------------------------------------------------------
+  // CONNECTED CARE WORKFLOW — doctor queue, prescriptions, radiology, billing
+  // ---------------------------------------------------------------------------
+
+  /** Doctor-facing live patient queue with dynamically computed wait time. */
+  app.get('/api/doctor/queue', requireAuth, (req: AuthenticatedRequest, res) => {
+    const doctorFilter = typeof req.query.doctor === 'string' ? req.query.doctor.trim().toLowerCase() : '';
+    const activeStatuses: AppointmentRecord['status'][] = ['Scheduled', 'Checked In', 'In Progress'];
+    const hasRecentReport = (a: AppointmentRecord) => {
+      if (!a.radiologyReportUploadedAt) return false;
+      return Date.now() - new Date(a.radiologyReportUploadedAt).getTime() < 24 * 60 * 60 * 1000;
+    };
+    const queue: DoctorQueueItem[] = db.appointments
+      .filter((a) => activeStatuses.includes(a.status) || hasRecentReport(a))
+      .filter((a) => !doctorFilter || a.doctorName.toLowerCase().includes(doctorFilter))
+      .map((a) => {
+        const patient = db.patients.find((p) => p.id === a.patientId || p.mrn === a.mrn);
+        const waitingMinutes = waitMinutesSince(a.queueJoinedAt || a.createdAt);
+        return {
+          ...a,
+          waitingMinutes,
+          patient,
+          prescription: a.prescriptionId ? db.prescriptions.find((r) => r.id === a.prescriptionId) : undefined,
+          radiologyOrder: a.radiologyOrderId ? db.radiologyOrders.find((o) => o.id === a.radiologyOrderId) : undefined,
+        };
+      })
+      .sort((a, b) => b.waitingMinutes - a.waitingMinutes);
+    res.json({ queue, doctors: Array.from(new Set(db.appointments.map((a) => a.doctorName))) });
+  });
+
+  /** Doctor uploads a prescription; the patient portal reads the same record. */
+  app.post('/api/appointments/:id/prescription', requireAuth, (req: AuthenticatedRequest, res) => {
+    const apt = db.appointments.find((a) => a.id === req.params.id);
+    if (!apt) {
+      res.status(404).json({ error: 'Appointment not found.' });
+      return;
+    }
+    const diagnosis = String(req.body?.diagnosis || '').trim();
+    const medications = String(req.body?.medications || '').trim();
+    const instructions = String(req.body?.instructions || '').trim();
+    const fileName = String(req.body?.fileName || '').trim();
+    const rawFileData = String(req.body?.fileData || '');
+    const fileData = rawFileData.startsWith('data:') && rawFileData.length <= 6_000_000 ? rawFileData : undefined;
+    if (!diagnosis && !medications) {
+      res.status(400).json({ error: 'Please add a diagnosis or medication details.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const prescription: PrescriptionRecord = {
+      id: `rx-${crypto.randomUUID().slice(0, 8)}`,
+      appointmentId: apt.id,
+      patientId: apt.patientId,
+      patientName: apt.patientName,
+      mrn: apt.mrn,
+      doctorName: apt.doctorName,
+      diagnosis,
+      medications,
+      instructions,
+      fileName: fileName || undefined,
+      fileData,
+      uploadedBy: req.authUser!.name,
+      createdAt: now,
+    };
+    db.prescriptions.unshift(prescription);
+    apt.prescriptionId = prescription.id;
+    apt.prescriptionUploadedAt = now;
+    if (apt.status === 'Scheduled' || apt.status === 'Checked In') apt.status = 'In Progress';
+
+    const patient = db.patients.find((p) => p.id === apt.patientId || p.mrn === apt.mrn);
+    if (patient) {
+      patient.medicalSummary = [patient.medicalSummary, `Prescription ${now.slice(0, 10)}: ${diagnosis || medications}`]
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    appendNotification(
+      'Prescription uploaded',
+      `${apt.patientName} · ${apt.doctorName}${fileName ? ` · ${fileName}` : ''}`,
+      apt.department,
+      'info',
+      { userId: apt.portalUserId, patientId: apt.patientId }
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'PRESCRIPTION_UPLOADED', prescription.id, 'Allowed');
+    saveDatabase(db);
+    res.status(201).json({ prescription, appointment: apt, patient });
+  });
+
+  /** Doctor refers a patient to Radiology for an X-ray; creates a trackable order. */
+  app.post('/api/appointments/:id/refer-radiology', requireAuth, (req: AuthenticatedRequest, res) => {
+    const apt = db.appointments.find((a) => a.id === req.params.id);
+    if (!apt) {
+      res.status(404).json({ error: 'Appointment not found.' });
+      return;
+    }
+    const examType = String(req.body?.examType || 'X-Ray').trim() || 'X-Ray';
+    const reason = String(req.body?.reason || apt.notes || '').trim();
+    const requestedPriority = String(req.body?.priority || 'Routine');
+    const priority: RadiologyOrderRecord['priority'] = ['Routine', 'Urgent', 'STAT'].includes(requestedPriority)
+      ? (requestedPriority as RadiologyOrderRecord['priority'])
+      : 'Routine';
+    const now = new Date().toISOString();
+    const order: RadiologyOrderRecord = {
+      id: nextSequentialCode('RAD', db.radiologyOrders.map((o) => o.id)),
+      appointmentId: apt.id,
+      patientId: apt.patientId,
+      patientName: apt.patientName,
+      mrn: apt.mrn,
+      doctorName: apt.doctorName,
+      department: apt.department,
+      examType,
+      reason,
+      priority,
+      status: 'Pending',
+      createdAt: now,
+      waitingMinutes: 0,
+    };
+    db.radiologyOrders.unshift(order);
+    apt.radiologyOrderId = order.id;
+    if (apt.status === 'Scheduled' || apt.status === 'Checked In') apt.status = 'In Progress';
+
+    const moduleRecord: HospitalModuleRecord = {
+      id: `mod-${crypto.randomUUID().slice(0, 8)}`,
+      module: 'radiology',
+      referenceCode: order.id,
+      title: `${examType} · ${apt.patientName}`,
+      subtitle: `Referred by ${apt.doctorName} · MRN ${apt.mrn}${reason ? ` · ${reason}` : ''}`,
+      status: 'Pending Review',
+      amountOrCount: examType,
+      createdAt: now,
+    };
+    db.moduleRecords.unshift(moduleRecord);
+
+    appendNotification(
+      'Radiology referral received',
+      `${apt.patientName} · ${examType} · MRN ${apt.mrn}`,
+      'Radiology',
+      'warning',
+      { userId: apt.portalUserId, patientId: apt.patientId, orderId: order.id }
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'RADIOLOGY_REFERRAL_CREATED', order.id, 'Allowed');
+    saveDatabase(db);
+    res.status(201).json({ order, appointment: apt, moduleRecord });
+  });
+
+  /** Radiology workspace list with live pending order wait times. */
+  app.get('/api/radiology/orders', requireAuth, (_req, res) => {
+    const orders = db.radiologyOrders
+      .map((o) => ({ ...o, waitingMinutes: waitMinutesSince(o.createdAt) }))
+      .sort((a, b) => (a.status === b.status ? b.waitingMinutes - a.waitingMinutes : a.status === 'Completed' ? 1 : -1));
+    res.json({ orders });
+  });
+
+  /** Radiology uploads the X-ray report; updates patient, doctor, and billing in one write. */
+  app.post('/api/radiology/orders/:id/report', requireAuth, (req: AuthenticatedRequest, res) => {
+    const order = db.radiologyOrders.find((o) => o.id === req.params.id);
+    if (!order) {
+      res.status(404).json({ error: 'Radiology order not found.' });
+      return;
+    }
+    const findings = String(req.body?.findings || '').trim();
+    const impression = String(req.body?.impression || '').trim();
+    const fileName = String(req.body?.fileName || '').trim();
+    const rawFileData = String(req.body?.fileData || '');
+    const fileData = rawFileData.startsWith('data:') && rawFileData.length <= 6_000_000 ? rawFileData : undefined;
+    if (!findings && !impression) {
+      res.status(400).json({ error: 'Please add radiology findings or an impression.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    order.report = {
+      findings,
+      impression,
+      fileName: fileName || undefined,
+      fileData,
+      uploadedBy: String(req.body?.uploadedBy || req.authUser!.name || 'Radiology Team'),
+      uploadedAt: now,
+    };
+    order.status = 'Completed';
+    order.completedAt = now;
+    order.waitingMinutes = waitMinutesSince(order.createdAt);
+
+    const radiologyModule = db.moduleRecords.find(
+      (r) => r.module === 'radiology' && r.referenceCode === order.id
+    );
+    if (radiologyModule) {
+      radiologyModule.status = 'Completed';
+      radiologyModule.subtitle = `${impression || findings}${fileName ? ` · ${fileName}` : ''}`;
+    }
+
+    const amount = 150;
+    const bill: PatientBillRecord = {
+      id: nextSequentialCode('BILL', db.bills.map((b) => b.id)),
+      patientId: order.patientId,
+      patientName: order.patientName,
+      mrn: order.mrn,
+      orderId: order.id,
+      description: `${order.examType} examination — ${order.id}`,
+      amount,
+      currency: 'USD',
+      status: 'Pending',
+      createdAt: now,
+    };
+    db.bills.unshift(bill);
+    order.billId = bill.id;
+
+    const billingModule: HospitalModuleRecord = {
+      id: `mod-${crypto.randomUUID().slice(0, 8)}`,
+      module: 'billing',
+      referenceCode: bill.id,
+      title: `X-ray charge · ${order.patientName}`,
+      subtitle: `Radiology order ${order.id} · ${order.examType}`,
+      status: 'Active',
+      amountOrCount: `$${amount.toFixed(2)}`,
+      createdAt: now,
+    };
+    db.moduleRecords.unshift(billingModule);
+
+    const apt = db.appointments.find((a) => a.id === order.appointmentId);
+    if (apt) {
+      apt.radiologyReportUploadedAt = now;
+      if (apt.status === 'In Progress') apt.status = 'Completed';
+    }
+    const patient = db.patients.find((p) => p.id === order.patientId || p.mrn === order.mrn);
+    if (patient) {
+      patient.medicalSummary = [patient.medicalSummary, `Radiology ${order.id}: ${impression || findings}`]
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    const portalUserId = patient?.userId || apt?.portalUserId;
+    appendNotification(
+      'X-ray report ready',
+      `${order.patientName} · ${order.examType} · ${impression || findings}`,
+      'Radiology',
+      'info',
+      { userId: portalUserId, patientId: order.patientId, orderId: order.id }
+    );
+    appendNotification(
+      'New patient bill',
+      `${order.patientName} · ${order.examType} · $${amount.toFixed(2)}`,
+      'Billing',
+      'warning',
+      { userId: portalUserId, patientId: order.patientId, orderId: order.id }
+    );
+    appendAudit(req.authUser!.email, req.authUser!.role, 'RADIOLOGY_REPORT_UPLOADED', order.id, 'Allowed');
+    saveDatabase(db);
+    res.json({ order, bill, moduleRecord: billingModule, appointment: apt });
+  });
+
+  /** Patient-scoped read model powering the patient portal. */
+  app.get('/api/patient/portal', requireAuth, (req: AuthenticatedRequest, res) => {
+    const patient = resolvePortalPatient(req);
+    if (!patient) {
+      res.status(404).json({ error: 'Patient portal record not found.' });
+      return;
+    }
+    const data: PatientPortalData = {
+      patient,
+      appointments: db.appointments.filter((a) => a.patientId === patient.id || a.mrn === patient.mrn),
+      prescriptions: db.prescriptions.filter((r) => r.patientId === patient.id),
+      radiologyOrders: db.radiologyOrders
+        .filter((o) => o.patientId === patient.id)
+        .map((o) => ({ ...o, waitingMinutes: waitMinutesSince(o.createdAt) })),
+      bills: db.bills.filter((b) => b.patientId === patient.id),
+      notifications: db.notifications
+        .filter((n) => n.patientId === patient.id || (patient.userId && n.userId === patient.userId))
+        .slice(0, 20),
+    };
+    res.json(data);
   });
 
   app.get('/api/agents', requireAuth, (_req, res) => {
@@ -2434,6 +3039,156 @@ export function createApiApp() {
 
   app.get('/api/departments', requireAuth, (_req, res) => {
     res.json({ departments: db.departments, staff: db.staff });
+  });
+
+  // Workspace administrators can add a department, and optionally provision its head
+  // with a generated sign-in ID and the default password ("password").
+  app.post('/api/departments', requireAuth, requireWorkspaceManager, async (req: AuthenticatedRequest, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const head = typeof req.body?.head === 'string' ? req.body.head.trim() : '';
+    const headEmail = typeof req.body?.headEmail === 'string' ? req.body.headEmail.trim().toLowerCase() : '';
+    const rawCapacity = Number(req.body?.bedCapacity);
+    if (!name) {
+      res.status(400).json({ error: 'Department name is required.' });
+      return;
+    }
+    if (db.departments.some((d) => d.name.toLowerCase() === name.toLowerCase())) {
+      res.status(409).json({ error: 'A department with that name already exists.' });
+      return;
+    }
+    if (headEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(headEmail)) {
+      res.status(400).json({ error: 'Please enter a valid head work email.' });
+      return;
+    }
+    if (headEmail && db.users.some((u) => u.email.toLowerCase() === headEmail)) {
+      res.status(409).json({ error: 'An account with that work email already exists.' });
+      return;
+    }
+
+    const caller = req.authUser!;
+    const department: DepartmentRecord = {
+      id: nextSequentialCode('DEP', db.departments.map((d) => d.id)),
+      name,
+      head: head || (headEmail ? headEmail.split('@')[0] : 'Unassigned'),
+      activePatients: 0,
+      staffOnDuty: 0,
+      totalStaff: 0,
+      bedCapacity: Number.isFinite(rawCapacity) && rawCapacity > 0 ? Math.round(rawCapacity) : 20,
+      occupiedBeds: 0,
+      avgWaitMinutes: 0,
+      status: 'Nominal',
+    };
+
+    let createdUser: StoredUser | null = null;
+    if (headEmail) {
+      createdUser = await createManagedUser(db, {
+        fullName: head || department.head,
+        email: headEmail,
+        role: 'clinician',
+        department: name,
+        hospitalName: caller.hospitalName,
+        hospitalId: caller.hospitalId,
+        applicationId: caller.applicationId,
+      });
+      department.head = createdUser.fullName;
+      db.staff.push({
+        id: `staff-${crypto.randomUUID().slice(0, 8)}`,
+        name: createdUser.fullName,
+        role: 'Department Head',
+        department: name,
+        shift: 'General',
+        availability: 'On Duty',
+        activeCases: 0,
+      });
+    }
+
+    db.departments.push(department);
+    appendAudit(caller.email, caller.role, 'DEPARTMENT_CREATED', department.id, 'Allowed');
+    saveDatabase(db);
+
+    const { passwordHash: _omitted, ...safeUser } = createdUser ?? ({} as StoredUser);
+    res.status(201).json({
+      department,
+      departmentId: department.id,
+      ...(createdUser
+        ? { user: safeUser, defaultUserId: createdUser.username, temporaryPassword: DEFAULT_TEMP_PASSWORD }
+        : {}),
+    });
+  });
+
+  app.get('/api/hospital/users', requireAuth, requireWorkspaceManager, (req: AuthenticatedRequest, res) => {
+    const caller = req.authUser!;
+    const users = db.users
+      .filter((u) => (caller.role === 'admin' ? true : !u.hospitalId || u.hospitalId === caller.hospitalId))
+      .map(({ passwordHash: _omitted, ...u }) => u);
+    res.json({ users });
+  });
+
+  // Workspace administrators provision staff with a generated User ID and default password.
+  app.post('/api/hospital/users', requireAuth, requireWorkspaceManager, async (req: AuthenticatedRequest, res) => {
+    const fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+    const workEmail = typeof req.body?.workEmail === 'string' ? req.body.workEmail.trim().toLowerCase() : '';
+    const requestedRole = typeof req.body?.role === 'string' ? req.body.role : 'clinician';
+    const department = typeof req.body?.department === 'string' ? req.body.department.trim() : '';
+    const contactNumber = typeof req.body?.contactNumber === 'string' ? req.body.contactNumber.trim() : '';
+    const allowedRoles: Array<StoredUser['role']> =
+      req.authUser!.role === 'admin'
+        ? ['coordinator', 'clinician', 'operator', 'admin']
+        : ['coordinator', 'clinician', 'operator'];
+
+    if (!fullName || !workEmail) {
+      res.status(400).json({ error: 'Full name and work email are required.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(workEmail)) {
+      res.status(400).json({ error: 'Please enter a valid work email address.' });
+      return;
+    }
+    if (!allowedRoles.includes(requestedRole as StoredUser['role'])) {
+      res.status(400).json({ error: 'Please choose a valid workspace role.' });
+      return;
+    }
+    if (db.users.some((u) => u.email.toLowerCase() === workEmail)) {
+      res.status(409).json({ error: 'An account with that work email already exists.' });
+      return;
+    }
+    if (department && !db.departments.some((d) => d.name === department)) {
+      res.status(400).json({ error: 'Please choose an existing department.' });
+      return;
+    }
+
+    const caller = req.authUser!;
+    const user = await createManagedUser(db, {
+      fullName,
+      email: workEmail,
+      role: requestedRole as Exclude<UserRole, 'patient'>,
+      department: department || undefined,
+      contactNumber,
+      hospitalName: caller.hospitalName,
+      hospitalId: caller.hospitalId,
+      applicationId: caller.applicationId,
+    });
+    if (department) {
+      db.staff.push({
+        id: `staff-${crypto.randomUUID().slice(0, 8)}`,
+        name: fullName,
+        role: requestedRole,
+        department,
+        shift: 'General',
+        availability: 'On Duty',
+        activeCases: 0,
+      });
+      const dept = db.departments.find((d) => d.name === department);
+      if (dept) dept.totalStaff += 1;
+    }
+    appendAudit(caller.email, caller.role, 'WORKSPACE_USER_CREATED', user.username!, 'Allowed');
+    saveDatabase(db);
+    const { passwordHash: _omitted, ...safeUser } = user;
+    res.status(201).json({
+      user: safeUser,
+      defaultUserId: user.username,
+      temporaryPassword: DEFAULT_TEMP_PASSWORD,
+    });
   });
 
   app.get('/api/resources', requireAuth, (_req, res) => {

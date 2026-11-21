@@ -34,6 +34,8 @@ interface AuthContextValue {
   refreshAdminStatus: () => Promise<void>;
   refreshMe: () => Promise<AuthUser | null>;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<AuthUser>;
+  /** Instantly switches the active session to another demo workspace/persona. */
+  switchWorkspace: (targetId: string) => Promise<AuthUser>;
   signup: (payload: SignupPayload) => Promise<AuthUser>;
   claimAdmin: (payload: ClaimAdminPayload) => Promise<AuthUser>;
   changeDefaultPassword: (currentPassword: string, newPassword: string) => Promise<AuthUser>;
@@ -138,6 +140,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return result.user;
   }, []);
 
+  const switchWorkspace = useCallback(
+    async (targetId: string): Promise<AuthUser> => {
+      if (!token) {
+        throw new Error('Please sign in before switching dashboards.');
+      }
+      const res = await fetch('/api/auth/switch-workspace', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ targetId }),
+      });
+      const result = (await parseJsonAuthResponse(res, 'Workspace switch failed.')) as {
+        token: string;
+        user: AuthUser;
+      };
+      setToken(result.token);
+      setUser(result.user);
+      return result.user;
+    },
+    [token]
+  );
+
   const signup = useCallback(async (payload: SignupPayload): Promise<AuthUser> => {
     const res = await fetch('/api/auth/signup', {
       method: 'POST',
@@ -205,6 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshAdminStatus,
         refreshMe,
         login,
+        switchWorkspace,
         signup,
         claimAdmin,
         changeDefaultPassword,

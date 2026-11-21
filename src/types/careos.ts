@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'coordinator' | 'clinician' | 'operator';
+export type UserRole = 'admin' | 'coordinator' | 'clinician' | 'operator' | 'patient';
 
 export interface AuthUser {
   id: string;
@@ -9,6 +9,13 @@ export interface AuthUser {
   hospitalType: string;
   hospitalId?: string;
   applicationId?: string;
+  /** Generated workspace sign-in ID (e.g. USR-2026-0007) issued by an administrator. */
+  username?: string;
+  /** Allows instant demo switching from the top dashboard switcher without re-entering credentials. */
+  demoSwitchable?: boolean;
+  /** Links a patient-role account to its clinical record. */
+  patientId?: string;
+  department?: string;
   contactNumber: string;
   status: 'active' | 'pending' | 'suspended';
   mustChangePassword?: boolean;
@@ -82,6 +89,73 @@ export interface PlatformActivityItem {
   timestamp: string;
 }
 
+export interface PatientPortalCredentials {
+  userId: string;
+  password?: string;
+  email: string;
+  mustChangePassword: boolean;
+  existing?: boolean;
+}
+
+export interface PrescriptionRecord {
+  id: string;
+  appointmentId: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  doctorName: string;
+  diagnosis: string;
+  medications: string;
+  instructions: string;
+  fileName?: string;
+  /** Small file attachments are stored as data URLs in this local preview build. */
+  fileData?: string;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export interface RadiologyReportRecord {
+  findings: string;
+  impression: string;
+  fileName?: string;
+  /** Small X-ray/report files are stored as data URLs in this local preview build. */
+  fileData?: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface RadiologyOrderRecord {
+  id: string;
+  appointmentId: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  doctorName: string;
+  department: string;
+  examType: string;
+  reason: string;
+  priority: 'Routine' | 'Urgent' | 'STAT';
+  status: 'Pending' | 'In Progress' | 'Completed';
+  createdAt: string;
+  waitingMinutes: number;
+  report?: RadiologyReportRecord;
+  billId?: string;
+  completedAt?: string;
+}
+
+export interface PatientBillRecord {
+  id: string;
+  patientId: string;
+  patientName: string;
+  mrn: string;
+  orderId?: string;
+  description: string;
+  amount: number;
+  currency: 'USD';
+  status: 'Pending' | 'Paid';
+  createdAt: string;
+}
+
 export interface PatientRecord {
   id: string;
   mrn: string;
@@ -97,6 +171,10 @@ export interface PatientRecord {
   lastVisit: string;
   medicalSummary: string;
   allergies: string[];
+  /** Patient portal authentication link. */
+  userId?: string;
+  portalUsername?: string;
+  portalEmail?: string;
 }
 
 export interface AppointmentRecord {
@@ -111,6 +189,31 @@ export interface AppointmentRecord {
   type: 'Consultation' | 'Follow-up' | 'Diagnostic' | 'Procedure' | 'Telehealth';
   status: 'Scheduled' | 'Checked In' | 'In Progress' | 'Completed' | 'Rescheduled' | 'Cancelled';
   notes: string;
+  createdAt?: string;
+  queueJoinedAt?: string;
+  waitingMinutes?: number;
+  portalUserId?: string;
+  portalUsername?: string;
+  prescriptionId?: string;
+  prescriptionUploadedAt?: string;
+  radiologyOrderId?: string;
+  radiologyReportUploadedAt?: string;
+}
+
+export interface PatientPortalData {
+  patient: PatientRecord;
+  appointments: AppointmentRecord[];
+  prescriptions: PrescriptionRecord[];
+  radiologyOrders: RadiologyOrderRecord[];
+  bills: PatientBillRecord[];
+  notifications: HospitalNotification[];
+}
+
+export interface DoctorQueueItem extends AppointmentRecord {
+  waitingMinutes: number;
+  patient?: PatientRecord;
+  prescription?: PrescriptionRecord;
+  radiologyOrder?: RadiologyOrderRecord;
 }
 
 export interface DepartmentRecord {
@@ -200,6 +303,10 @@ export interface HospitalNotification {
   severity: 'info' | 'warning' | 'critical';
   timestamp: string;
   read: boolean;
+  /** Optional patient/doctor scoping for clinical workflow notifications. */
+  userId?: string;
+  patientId?: string;
+  orderId?: string;
 }
 
 export interface OperationalTask {
