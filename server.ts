@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
   AgentProfile,
   ApplicationStatus,
@@ -1718,6 +1718,7 @@ async function startServer() {
     }
 
     const apiKey = (
+      process.env.GEMINI_API_KEY1 ||
       process.env.GEMINI_API_KEY ||
       process.env.GOOGLE_API_KEY ||
       process.env.API_KEY ||
@@ -1785,6 +1786,7 @@ async function startServer() {
           liveHospitalSnapshot: snapshot,
         }),
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction:
             'You are CareOS Intelligence, the central orchestrator of an AI-native Hospital Intelligence Operating System. ' +
             'Analyze the administratorInstruction against the liveHospitalSnapshot and coordinate ONLY the relevant specialized departmental agents from: ' +
