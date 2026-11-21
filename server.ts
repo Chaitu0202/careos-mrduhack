@@ -39,6 +39,7 @@ import type {
   WorkflowDefinition,
   WorkflowExecutionRecord,
 } from './src/types/careos.ts';
+import { applyDemoData } from './demoData.ts';
 
 interface StoredUser extends AuthUser {
   passwordHash: string;
@@ -123,6 +124,9 @@ const revokedTokens = new Map<string, number>();
 // Default credential issued by administrators when they provision a workspace user.
 // Every such account is created with mustChangePassword = true.
 const DEFAULT_TEMP_PASSWORD = 'password';
+
+/** Synthetic cross-dashboard demo dataset. Set CAREOS_DEMO_DATA=false for real deployments. */
+const DEMO_DATA_ENABLED = process.env.CAREOS_DEMO_DATA !== 'false';
 
 /** Deterministic, human-readable IDs such as USR-2026-0007 / DEP-2026-0003. */
 function nextSequentialCode(prefix: string, existing: string[]): string {
@@ -275,7 +279,7 @@ function getTodayDateString(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-// Clean zero-mock-data initial database
+// Base database; the synthetic cross-dashboard demo dataset is layered on by applyDemoData().
 function createInitialDatabase(): CareOSDatabase {
   const seededAdmin: StoredUser = {
     id: 'usr-super-admin',
@@ -310,7 +314,7 @@ function createInitialDatabase(): CareOSDatabase {
     passwordHash: INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH,
   };
 
-  return {
+  const initial: CareOSDatabase = {
     users: [seededAdmin, seededTestHospital],
     applications: [],
     hospitals: [],
@@ -521,6 +525,11 @@ function createInitialDatabase(): CareOSDatabase {
     workflowExecutions: [],
     departmentalAlerts: [],
   };
+
+  if (DEMO_DATA_ENABLED) {
+    applyDemoData(initial, { defaultPasswordHash: INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH });
+  }
+  return initial;
 }
 
 function loadDatabase(): CareOSDatabase {
@@ -593,6 +602,10 @@ function loadDatabase(): CareOSDatabase {
         u.username = u.email.toLowerCase();
         modified = true;
       }
+    }
+    if (DEMO_DATA_ENABLED) {
+      const seeded = applyDemoData(parsed, { defaultPasswordHash: INITIAL_HOSPITAL_DEFAULT_SCRYPT_HASH });
+      if (seeded) modified = true;
     }
     if (modified) {
       saveDatabase(parsed);

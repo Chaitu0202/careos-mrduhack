@@ -902,8 +902,9 @@ export function DashboardLayout({
             </div>
             <ul className="mt-4 space-y-2.5 text-xs leading-relaxed text-[#172B4D]">
               <li>
-                <span className="font-semibold text-[#102653]">Live Zero-Mock State:</span> All hospital pulse metrics,
-                attention counters, and reports start at 0 and update dynamically from real workspace records.
+                <span className="font-semibold text-[#102653]">Synthetic Demo Dataset:</span> Dashboards are preloaded with
+                sample patients, queues, claims, bills, agent runs, and alerts so every CareOS output is visible. Set
+                CAREOS_DEMO_DATA=false to start from an empty workspace.
               </li>
               <li>
                 <span className="font-semibold text-[#102653]">CareOS Command Bar:</span> Type any operational prompt or

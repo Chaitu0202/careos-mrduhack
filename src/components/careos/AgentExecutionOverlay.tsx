@@ -174,6 +174,9 @@ export function AgentExecutionOverlay({
       `EXECUTIVE BRIEF`,
       execution.executiveBrief,
       ``,
+      `VOICE CONFIRMATION`,
+      execution.voiceConfirmation,
+      ``,
       ...execution.reportSections.flatMap((sec) => [
         sec.title.toUpperCase(),
         ...sec.items.map((it) => `  - ${it.label}: ${it.value}`),
@@ -538,6 +541,12 @@ export function AgentExecutionOverlay({
                     <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[#4F627D]">
                       {execution.executiveBrief}
                     </p>
+                    {execution.voiceConfirmation && (
+                      <div className="mt-2 flex max-w-3xl flex-wrap items-start gap-x-2 gap-y-1 rounded-lg bg-[#F7FBFF] px-3 py-2 text-[11px] text-[#4F627D]">
+                        <span className="font-bold text-[#3299F5]">CareOS voice confirmation:</span>
+                        <span>&ldquo;{execution.voiceConfirmation}&rdquo;</span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
