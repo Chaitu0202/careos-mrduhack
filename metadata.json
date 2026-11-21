@@ -1,0 +1,6 @@
+{
+  "name": "CareOS",
+  "description": "The Operating System for Intelligent Healthcare. One connected platform connecting hospital departments, workflows, resources, and AI agents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
