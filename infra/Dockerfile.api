@@ -1,0 +1,29 @@
+# CareOS Express API container
+FROM oven/bun:1.2-alpine
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    CAREOS_DEMO_DATA=true \
+    CAREOS_DEMO_SWITCH=true
+
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile || bun install
+
+COPY api ./api
+COPY backend ./backend
+COPY shared ./shared
+COPY frontend/vite.config.ts ./frontend/vite.config.ts
+COPY frontend/index.html ./frontend/index.html
+COPY frontend/public ./frontend/public
+COPY frontend/src ./frontend/src
+COPY tsconfig.json ./
+COPY vercel.json ./
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD bun -e "const r = await fetch('http://127.0.0.1:3000/'); process.exit(r.ok ? 0 : 1)"
+
+CMD ["bun", "run", "start"]

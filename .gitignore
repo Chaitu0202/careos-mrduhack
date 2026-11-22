@@ -8,4 +8,8 @@ coverage/
 !.env.example
 .data/
 .aistudio/
+reports/
+database/generated/
+__pycache__/
+*.pyc
 

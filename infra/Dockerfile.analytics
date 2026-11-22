@@ -1,0 +1,18 @@
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    CAREOS_DATA_DIR=/app/.data \
+    CAREOS_ANALYTICS_HOST=0.0.0.0 \
+    CAREOS_ANALYTICS_PORT=8100
+
+WORKDIR /app
+COPY backend /app/backend
+COPY database /app/database
+
+EXPOSE 8100
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"
+
+CMD ["python", "-m", "backend.analytics.cli", "serve"]

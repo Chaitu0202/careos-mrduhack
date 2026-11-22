@@ -1,15 +1,22 @@
 {
-  "name": "react-example",
+  "name": "careos",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "node server.ts",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "dev": "tsx backend/server.ts",
+    "start": "tsx backend/server.ts",
+    "build": "vite build --config frontend/vite.config.ts",
+    "preview": "vite preview --config frontend/vite.config.ts",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "py": "node scripts/python.mjs",
+    "db:validate": "node scripts/python.mjs database/validate.py",
+    "db:migrate": "node scripts/python.mjs database/migrate.py",
+    "analytics": "node scripts/python.mjs -m backend.analytics.cli serve",
+    "analytics:check": "node scripts/python.mjs -m backend.analytics.cli check",
+    "analytics:test": "node scripts/python.mjs -m unittest discover -s backend/analytics/tests -t .",
+    "check": "bun run lint && bun run db:validate && bun run analytics:check && bun run analytics:test"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

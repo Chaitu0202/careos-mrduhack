@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      CAREOS_DEMO_DATA: "true"
+      CAREOS_DEMO_SWITCH: "true"
+    volumes:
+      - careos-data:/app/.data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r=await fetch('http://127.0.0.1:3000/'); process.exit(r.ok?0:1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  analytics:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.analytics
+    ports:
+      - "8100:8100"
+    environment:
+      CAREOS_DATA_DIR: /app/.data
+      CAREOS_ANALYTICS_HOST: 0.0.0.0
+      CAREOS_ANALYTICS_PORT: "8100"
+      CAREOS_ANALYTICS_KEY: ${CAREOS_ANALYTICS_KEY:-}
+    volumes:
+      - careos-data:/app/.data:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  careos-data:
