@@ -1,0 +1,1243 @@
+{
+  "name": "CareOS · WF1 Appointment Booking",
+  "nodes": [
+    {
+      "id": "376e2989-1d78-47b0-ac93-d3ad87b7d438",
+      "name": "When Called by Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "task_id",
+              "type": "string"
+            },
+            {
+              "name": "from_agent",
+              "type": "string"
+            },
+            {
+              "name": "patient_id",
+              "type": "string"
+            },
+            {
+              "name": "department",
+              "type": "string"
+            },
+            {
+              "name": "doctor_id",
+              "type": "string"
+            },
+            {
+              "name": "appt_date",
+              "type": "string"
+            },
+            {
+              "name": "preferred_time",
+              "type": "string"
+            },
+            {
+              "name": "time_of_day",
+              "type": "string"
+            },
+            {
+              "name": "mode",
+              "type": "string"
+            },
+            {
+              "name": "user_role",
+              "type": "string"
+            },
+            {
+              "name": "user_ref",
+              "type": "string"
+            },
+            {
+              "name": "request_text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "28724573-a0b8-4453-af1c-f1782577f0d0",
+      "name": "Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst isWebhook = !!(raw.body && typeof raw.body === 'object' && raw.headers);\nconst src = isWebhook ? raw.body : raw;\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nreturn [{ json: {\n  channel: isWebhook ? 'webhook' : 'tool',\n  task_id: s(src.task_id) || ('TASK-' + Date.now()),\n  from_agent: s(src.from_agent) || 'orchestrator',\n  patient_id: s(src.patient_id).toUpperCase(),\n  department: s(src.department),\n  doctor_id: s(src.doctor_id).toUpperCase(),\n  appt_date: s(src.appt_date),\n  preferred_time: s(src.preferred_time),\n  time_of_day: s(src.time_of_day).toLowerCase(),\n  mode: s(src.mode).toLowerCase() || 'options',\n  user_role: s(src.user_role).toLowerCase(),\n  user_ref: s(src.user_ref),\n  request_text: s(src.request_text)\n} }];"
+      }
+    },
+    {
+      "id": "3fee7f96-8d92-47c7-aed8-5f19f4ba4bac",
+      "name": "Booking Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "careos/appointments/book",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "f5e84ce3-b84a-4fe4-9a7b-55358d5501cb"
+    },
+    {
+      "id": "2a946421-c3f2-4c03-bea0-ffa9c3044ffe",
+      "name": "Get Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f7397905-cd52-49fd-b671-8161d6566066",
+      "name": "Get Department Doctors",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "department",
+              "condition": "ilike",
+              "keyValue": "={{ $('Normalize Request').first().json.department || '%' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "df54ed6d-2baf-425a-961b-3cdf684a3fa7",
+      "name": "Get All Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "34350d7a-a2ac-49e1-9d60-cad5e6bb0af3",
+      "name": "Get Department Queue",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0aWu6KWa0lSkTaSS",
+          "cachedResultName": "careos_queues"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "department",
+              "condition": "ilike",
+              "keyValue": "={{ $('Normalize Request').first().json.department || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "da2fea8b-478a-412e-b4fa-0be326814606",
+      "name": "Plan Booking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nconst raw = $('Normalize Request').first().json;\nconst req = raw;\nconst clean = (arr, k) => arr.map(i => i.json).filter(r => r && r[k]);\nconst patients = clean($('Get Patient').all(), 'patient_id');\nconst doctorsAll = clean($('Get Department Doctors').all(), 'doctor_id');\nconst appts = clean($('Get All Appointments').all(), 'appointment_id');\nconst queues = clean($('Get Department Queue').all(), 'department');\nconst nowIST = $now.setZone('Asia/Kolkata');\nconst todayIST = nowIST.toISODate();\nconst DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];\nconst toMin = (t) => { const m = /^(\\d{1,2}):(\\d{2})$/.exec(s(t)); return m ? parseInt(m[1],10)*60 + parseInt(m[2],10) : null; };\nconst fmt = (m) => String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');\nconst weekday = (d) => { const dt = new Date(d + 'T00:00:00Z'); return DAYS[(dt.getUTCDay() + 6) % 7]; };\nconst addDays = (d, n) => { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0,10); };\n\nconst out = { req: req, status: 'error', reason: '', options: [], alternatives: [], write: false };\nconst fail = (status, reason, extra) => Object.assign(out, { status: status, reason: reason }, extra || {});\n\nconst eligibleDoctors = (date) => doctorsAll.filter(d => String(d.status).toLowerCase() === 'on_duty'\n  && (!req.doctor_id || d.doctor_id === req.doctor_id)\n  && String(d.available_days || '').split(',').map(x => x.trim()).indexOf(weekday(date)) !== -1);\nconst freeSlots = (date) => {\n  const res = [];\n  const nowMin = date === todayIST ? nowIST.hour * 60 + nowIST.minute : -1;\n  for (const d of eligibleDoctors(date)) {\n    const a = toMin(d.shift_start), b = toMin(d.shift_end), step = d.slot_minutes || 30;\n    if (a === null || b === null) continue;\n    const taken = appts.filter(x => x.doctor_id === d.doctor_id && x.appt_date === date && String(x.status).toLowerCase() !== 'cancelled').map(x => toMin(x.appt_time));\n    for (let m = a; m + step <= b; m += step) {\n      if (req.time_of_day === 'morning' && m >= 720) continue;\n      if (req.time_of_day === 'afternoon' && m < 720) continue;\n      if (m <= nowMin) continue;\n      if (taken.indexOf(m) !== -1) continue;\n      res.push({ doctor_id: d.doctor_id, doctor_name: d.doctor_name, department: d.department, date: date, time: fmt(m) });\n    }\n  }\n  return res.sort((x, y) => x.time.localeCompare(y.time) || x.doctor_id.localeCompare(y.doctor_id));\n};\nconst nextDates = (from) => {\n  const alts = [];\n  for (let i = 1; i <= 21 && alts.length < 2; i++) {\n    const d = addDays(from, i); const fs = freeSlots(d);\n    if (fs.length) alts.push({ date: d, slots: fs.slice(0, 3) });\n  }\n  return alts;\n};\n\n(function run() {\n  if (!req.patient_id) return fail('error', 'patient_id required');\n  if (!req.department && !req.doctor_id) return fail('error', 'department required');\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(req.appt_date)) return fail('error', 'appt_date must be YYYY-MM-DD');\n  if (req.appt_date < todayIST) return fail('error', 'appt_date is in the past');\n  if (['options','book'].indexOf(req.mode) === -1) return fail('error', \"mode must be 'options' or 'book'\");\n  if (req.time_of_day && ['morning','afternoon'].indexOf(req.time_of_day) === -1) return fail('error', \"time_of_day must be 'morning' or 'afternoon'\");\n  if (['patient','admin','operations','nurse','doctor','reception'].indexOf(req.user_role) === -1) return fail('forbidden', 'role ' + (req.user_role || '(none)') + ' may not book appointments');\n  if (req.user_role === 'patient' && req.user_ref.toUpperCase() !== req.patient_id) return fail('forbidden', 'patients may only book for their own patient_id');\n  const patient = patients[0];\n  if (!patient) return fail('error', 'patient ' + req.patient_id + ' not found');\n  out.patient = { patient_id: patient.patient_id, patient_name: patient.patient_name };\n  if (!doctorsAll.length) return fail('no_availability', 'no doctors found for department ' + req.department, { alternatives: [] });\n\n  const slots = freeSlots(req.appt_date);\n  if (req.mode === 'options') {\n    if (!slots.length) return fail('no_availability', 'no free slots on ' + req.appt_date, { alternatives: nextDates(req.appt_date) });\n    return Object.assign(out, { status: 'success', reason: 'options', options: slots.slice(0, 5) });\n  }\n  // book\n  if (!req.doctor_id || !req.preferred_time) return fail('error', 'doctor_id and preferred_time required to book');\n  const doc = doctorsAll.find(d => d.doctor_id === req.doctor_id);\n  if (!doc) return fail('error', 'doctor ' + req.doctor_id + ' not in department ' + req.department);\n  const pt = toMin(req.preferred_time);\n  if (pt === null) return fail('error', 'preferred_time must be HH:MM');\n  const t = fmt(pt);\n  const clash = appts.find(x => x.doctor_id === req.doctor_id && x.appt_date === req.appt_date && toMin(x.appt_time) === pt && String(x.status).toLowerCase() !== 'cancelled');\n  const patientClash = appts.find(x => x.patient_id === req.patient_id && x.appt_date === req.appt_date && toMin(x.appt_time) === pt && String(x.status).toLowerCase() !== 'cancelled');\n  if (clash || patientClash) {\n    return fail('conflict', clash ? ('slot ' + t + ' already taken by ' + clash.appointment_id) : ('patient already has ' + patientClash.appointment_id + ' at ' + t), { options: slots.slice(0, 5), alternatives: slots.length ? [] : nextDates(req.appt_date) });\n  }\n  if (!slots.find(x => x.doctor_id === req.doctor_id && x.time === t)) {\n    return fail('no_availability', doc.doctor_name + ' is not available at ' + t + ' on ' + req.appt_date, { options: slots.slice(0, 5), alternatives: slots.length ? [] : nextDates(req.appt_date) });\n  }\n  const maxNum = appts.reduce((m, x) => { const n = parseInt(String(x.appointment_id).replace(/\\D/g, ''), 10); return isNaN(n) ? m : Math.max(m, n); }, 5000);\n  const apptId = 'APT' + (maxNum + 1);\n  const q = queues.find(x => String(x.department).toLowerCase() === String(doc.department).toLowerCase());\n  let token = '';\n  let queueUpdate = null;\n  if (req.appt_date === todayIST && q) {\n    const next = (q.last_token_issued || 0) + 1;\n    token = (q.token_prefix || '') + next;\n    queueUpdate = { department: q.department, last_token_issued: next, patients_waiting: (q.patients_waiting || 0) + 1, updated_at: new Date().toISOString() };\n  }\n  const nowIso = new Date().toISOString();\n  const ts = Date.now();\n  Object.assign(out, {\n    status: 'success', reason: 'booked', write: true,\n    appointment: { appointment_id: apptId, patient_id: req.patient_id, doctor_id: doc.doctor_id, department: doc.department, appt_date: req.appt_date, appt_time: t, erp_appt_time: t, status: 'scheduled', queue_token: token, booked_by: 'appointment_agent', updated_at: nowIso },\n    doctor_name: doc.doctor_name,\n    needs_token: !!queueUpdate,\n    queue_update: queueUpdate || { department: '', last_token_issued: 0, patients_waiting: 0, updated_at: nowIso },\n    journey: { event_id: 'EVT-' + ts, patient_id: req.patient_id, event_type: 'APPOINTMENT_BOOKED', department: doc.department, actor: 'appointment_agent', status: 'completed', source_system: 'suvarna_erp', related_task: req.task_id, related_appointment: apptId, related_resource: doc.doctor_id, sequence: 0, event_time: nowIso },\n    notification: { notification_id: 'NTF-' + ts, created_at_ts: nowIso, recipient_type: 'patient', recipient_ref: req.patient_id, channel: 'in_app', message: 'Your appointment ' + apptId + ' with ' + doc.doctor_name + ' (' + doc.department + ') is confirmed for ' + req.appt_date + ' at ' + t + (token ? '. Queue token: ' + token : '') + '.', source_agent: 'appointment_agent', severity: 'info', status: 'sent' }\n  });\n})();\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "eaa90950-8ad7-4a29-84cc-1a7a1e72eb1b",
+      "name": "Booking Confirmed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1616,
+        224
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "w",
+              "leftValue": "={{ $json.write }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "35fa2a27-2cc4-476c-a906-dc6a3f3f0733",
+      "name": "Create Appointment in ERP",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appointment_id": "={{ $('Plan Booking').first().json.appointment.appointment_id }}",
+            "patient_id": "={{ $('Plan Booking').first().json.appointment.patient_id }}",
+            "doctor_id": "={{ $('Plan Booking').first().json.appointment.doctor_id }}",
+            "department": "={{ $('Plan Booking').first().json.appointment.department }}",
+            "appt_date": "={{ $('Plan Booking').first().json.appointment.appt_date }}",
+            "appt_time": "={{ $('Plan Booking').first().json.appointment.appt_time }}",
+            "erp_appt_time": "={{ $('Plan Booking').first().json.appointment.erp_appt_time }}",
+            "status": "={{ $('Plan Booking').first().json.appointment.status }}",
+            "queue_token": "={{ $('Plan Booking').first().json.appointment.queue_token }}",
+            "booked_by": "={{ $('Plan Booking').first().json.appointment.booked_by }}",
+            "updated_at": "={{ $('Plan Booking').first().json.appointment.updated_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "appointment_id",
+              "displayName": "appointment_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "doctor_id",
+              "displayName": "doctor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_date",
+              "displayName": "appt_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_time",
+              "displayName": "appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "erp_appt_time",
+              "displayName": "erp_appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "queue_token",
+              "displayName": "queue_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booked_by",
+              "displayName": "booked_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f8727911-74c7-44d4-9fab-49f6cdd56517",
+      "name": "Same-Day Visit?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        224
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "t",
+              "leftValue": "={{ $('Plan Booking').first().json.needs_token }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "eb1050dc-637c-4e5c-a965-a2a735a2d2a9",
+      "name": "Issue Queue Token",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        144
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0aWu6KWa0lSkTaSS",
+          "cachedResultName": "careos_queues"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "department",
+              "condition": "eq",
+              "keyValue": "={{ $('Plan Booking').first().json.queue_update.department }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_token_issued": "={{ $('Plan Booking').first().json.queue_update.last_token_issued }}",
+            "patients_waiting": "={{ $('Plan Booking').first().json.queue_update.patients_waiting }}",
+            "updated_at": "={{ $('Plan Booking').first().json.queue_update.updated_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "last_token_issued",
+              "displayName": "last_token_issued",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patients_waiting",
+              "displayName": "patients_waiting",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3936c06d-f219-4d7f-8c32-e9bebc858d15",
+      "name": "Log Journey Event",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "9C2EsBnXy4kQxIy0",
+          "cachedResultName": "careos_journey_events"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $('Plan Booking').first().json.journey.event_id }}",
+            "patient_id": "={{ $('Plan Booking').first().json.journey.patient_id }}",
+            "event_type": "={{ $('Plan Booking').first().json.journey.event_type }}",
+            "department": "={{ $('Plan Booking').first().json.journey.department }}",
+            "actor": "={{ $('Plan Booking').first().json.journey.actor }}",
+            "status": "={{ $('Plan Booking').first().json.journey.status }}",
+            "source_system": "={{ $('Plan Booking').first().json.journey.source_system }}",
+            "related_task": "={{ $('Plan Booking').first().json.journey.related_task }}",
+            "related_appointment": "={{ $('Plan Booking').first().json.journey.related_appointment }}",
+            "related_resource": "={{ $('Plan Booking').first().json.journey.related_resource }}",
+            "sequence": "={{ $('Plan Booking').first().json.journey.sequence }}",
+            "event_time": "={{ $('Plan Booking').first().json.journey.event_time }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_system",
+              "displayName": "source_system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_task",
+              "displayName": "related_task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_appointment",
+              "displayName": "related_appointment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_resource",
+              "displayName": "related_resource",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sequence",
+              "displayName": "sequence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_time",
+              "displayName": "event_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "2e3cb4d8-61ca-4631-a344-d5355b6f1a3e",
+      "name": "Build Audit Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const p = $('Plan Booking').first().json;\nconst r = p.req;\nconst base = { log_time: new Date().toISOString(), task_id: r.task_id, user_role: r.user_role, user_ref: r.user_ref, request: r.request_text || ('book ' + r.department + ' ' + r.appt_date + ' ' + (r.preferred_time || r.time_of_day || '')), from_agent: r.from_agent, patient_id: r.patient_id };\nconst rows = [];\nif (p.write) {\n  rows.push(Object.assign({}, base, { to_agent: 'appointment_agent', action: 'create_appointment', system: 'suvarna_erp', result_status: 'success', result_summary: p.appointment.appointment_id + ' ' + p.doctor_name + ' ' + p.appointment.appt_date + ' ' + p.appointment.appt_time }));\n  if (p.needs_token) rows.push(Object.assign({}, base, { from_agent: 'appointment_agent', to_agent: 'queue_agent', action: 'issue_queue_token', system: 'careos_data_layer', result_status: 'success', result_summary: 'token ' + p.appointment.queue_token + ' for ' + p.appointment.appointment_id }));\n  rows.push(Object.assign({}, base, { from_agent: 'appointment_agent', to_agent: 'notification', action: 'send_notification', system: 'careos_data_layer', result_status: 'success', result_summary: 'in_app confirmation to ' + r.patient_id }));\n} else {\n  rows.push(Object.assign({}, base, { to_agent: 'appointment_agent', action: r.mode === 'book' ? 'create_appointment' : 'list_slot_options', system: 'suvarna_erp', result_status: p.status, result_summary: String(p.status === 'success' ? (p.options.length + ' slot options') : p.reason).slice(0, 480) }));\n}\nreturn rows.map(j => ({ json: j }));"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "e4c29593-c009-448d-be95-e6c8e6b21bc1",
+      "name": "Notify Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nRHJwV5ivDhi5d9y",
+          "cachedResultName": "careos_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "notification_id": "={{ $('Plan Booking').first().json.notification.notification_id }}",
+            "created_at_ts": "={{ $('Plan Booking').first().json.notification.created_at_ts }}",
+            "recipient_type": "={{ $('Plan Booking').first().json.notification.recipient_type }}",
+            "recipient_ref": "={{ $('Plan Booking').first().json.notification.recipient_ref }}",
+            "channel": "={{ $('Plan Booking').first().json.notification.channel }}",
+            "message": "={{ $('Plan Booking').first().json.notification.message }}",
+            "source_agent": "={{ $('Plan Booking').first().json.notification.source_agent }}",
+            "severity": "={{ $('Plan Booking').first().json.notification.severity }}",
+            "status": "={{ $('Plan Booking').first().json.notification.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "notification_id",
+              "displayName": "notification_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at_ts",
+              "displayName": "created_at_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_type",
+              "displayName": "recipient_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_ref",
+              "displayName": "recipient_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_agent",
+              "displayName": "source_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "34a8b569-f088-4b7e-9dee-1ffbc9b22dc5",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_time": "={{ $json.log_time }}",
+            "task_id": "={{ $json.task_id }}",
+            "user_role": "={{ $json.user_role }}",
+            "user_ref": "={{ $json.user_ref }}",
+            "request": "={{ $json.request }}",
+            "from_agent": "={{ $json.from_agent }}",
+            "to_agent": "={{ $json.to_agent }}",
+            "action": "={{ $json.action }}",
+            "system": "={{ $json.system }}",
+            "patient_id": "={{ $json.patient_id }}",
+            "result_status": "={{ $json.result_status }}",
+            "result_summary": "={{ $json.result_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_time",
+              "displayName": "log_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_role",
+              "displayName": "user_role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_ref",
+              "displayName": "user_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from_agent",
+              "displayName": "from_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "to_agent",
+              "displayName": "to_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_status",
+              "displayName": "result_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_summary",
+              "displayName": "result_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b27c80e7-918b-48f7-b9ab-63f0ee465fe0",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const p = $('Plan Booking').first().json;\nconst r = p.req;\nconst a = p.appointment || {};\nconst result = {\n  appointment_id: a.appointment_id || null,\n  patient_id: r.patient_id,\n  doctor_id: a.doctor_id || r.doctor_id || null,\n  doctor_name: p.doctor_name || null,\n  department: a.department || r.department,\n  appt_date: a.appt_date || r.appt_date,\n  appt_time: a.appt_time || null,\n  queue_token: a.queue_token || null,\n  options: p.options || []\n};\nif (p.status !== 'success' || p.reason !== 'booked') result.reason = p.reason;\nif (p.alternatives && p.alternatives.length) result.alternatives = p.alternatives;\nif (p.write) result.notification = p.notification.message;\nreturn [{ json: { task_id: r.task_id, agent: 'appointment_agent', status: p.status, result: result, _channel: r.channel } }];"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "05b1a2c7-c374-4dfd-b4b9-6393fa6215d5",
+      "name": "Called via Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c",
+              "leftValue": "={{ $json._channel }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "1cd24ecb-8020-4f7b-83ef-065b64de9380",
+      "name": "Respond to Caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2224,
+        224
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}",
+        "options": {
+          "responseCode": "={{ $json.status === 'forbidden' ? 403 : ($json.status === 'error' ? 400 : ($json.status === 'conflict' ? 409 : 200)) }}"
+        }
+      }
+    },
+    {
+      "id": "a3e2f762-c246-46ca-bd45-e6d9fac49c48",
+      "name": "Return to Agent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2224,
+        416
+      ],
+      "parameters": {
+        "mode": "raw",
+        "includeOtherFields": false,
+        "options": {},
+        "jsonOutput": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Get Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Patient": {
+      "main": [
+        [
+          {
+            "node": "Get Department Doctors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Department Doctors": {
+      "main": [
+        [
+          {
+            "node": "Get All Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Appointments": {
+      "main": [
+        [
+          {
+            "node": "Get Department Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Department Queue": {
+      "main": [
+        [
+          {
+            "node": "Plan Booking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Booking": {
+      "main": [
+        [
+          {
+            "node": "Booking Confirmed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Confirmed?": {
+      "main": [
+        [
+          {
+            "node": "Create Appointment in ERP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Appointment in ERP": {
+      "main": [
+        [
+          {
+            "node": "Same-Day Visit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Same-Day Visit?": {
+      "main": [
+        [
+          {
+            "node": "Issue Queue Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Journey Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Issue Queue Token": {
+      "main": [
+        [
+          {
+            "node": "Log Journey Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Journey Event": {
+      "main": [
+        [
+          {
+            "node": "Notify Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Audit Rows": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Patient": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Called via Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called via Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return to Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

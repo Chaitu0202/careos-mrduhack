@@ -1,0 +1,1022 @@
+{
+  "name": "CareOS · WF2 Appointment Rescheduling",
+  "nodes": [
+    {
+      "id": "e670485a-4903-4b09-ab58-acdd79e5f2eb",
+      "name": "When Called by Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "task_id",
+              "type": "string"
+            },
+            {
+              "name": "from_agent",
+              "type": "string"
+            },
+            {
+              "name": "appointment_id",
+              "type": "string"
+            },
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "new_date",
+              "type": "string"
+            },
+            {
+              "name": "new_time",
+              "type": "string"
+            },
+            {
+              "name": "confirmed",
+              "type": "boolean"
+            },
+            {
+              "name": "user_role",
+              "type": "string"
+            },
+            {
+              "name": "user_ref",
+              "type": "string"
+            },
+            {
+              "name": "request_text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bae29b38-15ec-40de-86f1-248ddddb68fb",
+      "name": "Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst isWebhook = !!(raw.body && typeof raw.body === 'object' && raw.headers);\nconst src = isWebhook ? raw.body : raw;\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nreturn [{ json: {\n  channel: isWebhook ? 'webhook' : 'tool',\n  task_id: s(src.task_id) || ('TASK-' + Date.now()),\n  from_agent: s(src.from_agent) || 'orchestrator',\n  appointment_id: s(src.appointment_id).toUpperCase(),\n  action: s(src.action).toLowerCase(),\n  new_date: s(src.new_date),\n  new_time: s(src.new_time),\n  confirmed: src.confirmed === true || s(src.confirmed).toLowerCase() === 'true',\n  user_role: s(src.user_role).toLowerCase(),\n  user_ref: s(src.user_ref),\n  request_text: s(src.request_text)\n} }];"
+      }
+    },
+    {
+      "id": "987e8653-d320-4efc-996a-f6b123f3c055",
+      "name": "Reschedule Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "careos/appointments/reschedule",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "87651566-b1db-48d4-938d-609d74496df1"
+    },
+    {
+      "id": "78ae2fc6-6316-4f9d-b5ca-c6f22f9bcf55",
+      "name": "Get Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "appointment_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.appointment_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "5c820b80-82a9-40b2-855f-a239287ee935",
+      "name": "Get Doctor",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get Appointment').first().json.doctor_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "34e6da48-a78f-437e-9923-4c18d35ea092",
+      "name": "Get Doctor Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get Appointment').first().json.doctor_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f9cc2048-0fbf-4d32-9840-ad0011ec4166",
+      "name": "Plan Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Normalize Request').first().json;\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nconst clean = (arr, k) => arr.map(i => i.json).filter(r => r && r[k]);\nconst appt = clean($('Get Appointment').all(), 'appointment_id')[0];\nconst doc = clean($('Get Doctor').all(), 'doctor_id')[0];\nconst docAppts = clean($('Get Doctor Appointments').all(), 'appointment_id');\nconst nowIST = $now.setZone('Asia/Kolkata');\nconst todayIST = nowIST.toISODate();\nconst DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];\nconst toMin = (t) => { const m = /^(\\d{1,2}):(\\d{2})$/.exec(s(t)); return m ? parseInt(m[1],10)*60 + parseInt(m[2],10) : null; };\nconst fmt = (m) => String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');\nconst weekday = (d) => { const dt = new Date(d + 'T00:00:00Z'); return DAYS[(dt.getUTCDay() + 6) % 7]; };\nconst addDays = (d, n) => { const dt = new Date(d + 'T00:00:00Z'); dt.setUTCDate(dt.getUTCDate() + n); return dt.toISOString().slice(0,10); };\n\nconst out = { req: req, status: 'error', reason: '', options: [], write: false, appt: appt || null, doctor_name: doc ? doc.doctor_name : null };\nconst fail = (status, reason, extra) => Object.assign(out, { status: status, reason: reason }, extra || {});\n\nconst freeSlots = (date) => {\n  if (!doc || String(doc.status).toLowerCase() !== 'on_duty') return [];\n  if (String(doc.available_days || '').split(',').map(x => x.trim()).indexOf(weekday(date)) === -1) return [];\n  const a = toMin(doc.shift_start), b = toMin(doc.shift_end), step = doc.slot_minutes || 30;\n  if (a === null || b === null) return [];\n  const nowMin = date === todayIST ? nowIST.hour * 60 + nowIST.minute : -1;\n  const taken = docAppts.filter(x => x.appt_date === date && x.appointment_id !== appt.appointment_id && String(x.status).toLowerCase() !== 'cancelled').map(x => toMin(x.appt_time));\n  const res = [];\n  for (let m = a; m + step <= b; m += step) {\n    if (m <= nowMin || taken.indexOf(m) !== -1) continue;\n    res.push({ doctor_id: doc.doctor_id, doctor_name: doc.doctor_name, date: date, time: fmt(m) });\n  }\n  return res;\n};\nconst nextDays = (from, n) => {\n  const res = [];\n  for (let i = 0; i <= 21 && res.length < n; i++) {\n    const d = addDays(from, i); if (d < todayIST) continue;\n    const fs = freeSlots(d); if (fs.length) res.push({ date: d, slots: fs.slice(0, 4) });\n  }\n  return res;\n};\nconst flatten = (days) => days.reduce((acc, d) => acc.concat(d.slots), []);\n\n(function run() {\n  if (!req.appointment_id) return fail('error', 'appointment_id required');\n  if (['find_slots','reschedule','cancel'].indexOf(req.action) === -1) return fail('error', \"action must be find_slots, reschedule or cancel\");\n  if (['patient','admin','operations','nurse','doctor','reception'].indexOf(req.user_role) === -1) return fail('forbidden', 'role ' + (req.user_role || '(none)') + ' may not change appointments');\n  if (!appt) return fail('not_found', 'appointment ' + req.appointment_id + ' not found');\n  if (req.user_role === 'patient' && req.user_ref.toUpperCase() !== String(appt.patient_id).toUpperCase()) return fail('forbidden', 'patients may only change their own appointments');\n  const st = String(appt.status).toLowerCase();\n  if (st === 'cancelled' || st === 'completed') return fail('error', 'appointment ' + appt.appointment_id + ' is ' + st + ' and cannot be changed');\n  if (s(appt.erp_appt_time) && s(appt.appt_time) !== s(appt.erp_appt_time)) {\n    return fail('conflict_detected', 'Scheduling shows ' + appt.appt_time + ' while Suvarna ERP shows ' + appt.erp_appt_time + '. Human verification required.', { conflict: { scheduling_time: appt.appt_time, erp_time: appt.erp_appt_time } });\n  }\n  const nowIso = new Date().toISOString();\n  const ts = Date.now();\n  if (req.action === 'find_slots') {\n    const start = /^\\d{4}-\\d{2}-\\d{2}$/.test(req.new_date) ? req.new_date : addDays(todayIST, 1);\n    let opts = /^\\d{4}-\\d{2}-\\d{2}$/.test(req.new_date) ? freeSlots(req.new_date).slice(0, 8) : [];\n    if (!opts.length) opts = flatten(nextDays(start, 3));\n    if (!opts.length) return fail('no_availability', 'no free slots for ' + (doc ? doc.doctor_name : appt.doctor_id) + ' in the next 3 weeks');\n    return Object.assign(out, { status: 'success', reason: 'options', options: opts });\n  }\n  if (req.action === 'cancel') {\n    if (!req.confirmed) return fail('confirmation_required', 'Human confirmation required to cancel ' + appt.appointment_id);\n    return Object.assign(out, { status: 'success', reason: 'cancelled', write: true, new_date: appt.appt_date, new_time: appt.appt_time,\n      update: { appt_date: appt.appt_date, appt_time: appt.appt_time, erp_appt_time: appt.erp_appt_time || appt.appt_time, status: 'cancelled', updated_at: nowIso },\n      journey: { event_id: 'EVT-' + ts, patient_id: appt.patient_id, event_type: 'APPOINTMENT_CANCELLED', department: appt.department, actor: 'appointment_agent', status: 'completed', source_system: 'suvarna_erp', related_task: req.task_id, related_appointment: appt.appointment_id, related_resource: appt.doctor_id, sequence: 0, event_time: nowIso },\n      notification: { notification_id: 'NTF-' + ts, created_at_ts: nowIso, recipient_type: 'patient', recipient_ref: appt.patient_id, channel: 'in_app', message: 'Your appointment ' + appt.appointment_id + ' on ' + appt.appt_date + ' at ' + appt.appt_time + ' has been cancelled.', source_agent: 'appointment_agent', severity: 'info', status: 'sent' } });\n  }\n  // reschedule\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(req.new_date)) return fail('error', 'new_date must be YYYY-MM-DD');\n  if (req.new_date < todayIST) return fail('error', 'new_date is in the past');\n  const nt = toMin(req.new_time);\n  if (nt === null) return fail('error', 'new_time must be HH:MM');\n  const t = fmt(nt);\n  if (req.new_date === appt.appt_date && t === fmt(toMin(appt.appt_time))) return fail('error', 'new slot is the same as the current slot');\n  const free = freeSlots(req.new_date);\n  if (!free.find(x => x.time === t)) {\n    const clash = docAppts.find(x => x.appt_date === req.new_date && toMin(x.appt_time) === nt && x.appointment_id !== appt.appointment_id && String(x.status).toLowerCase() !== 'cancelled');\n    const alts = free.length ? free.slice(0, 5) : flatten(nextDays(addDays(req.new_date, 1), 3));\n    return fail('slot_taken', clash ? ('slot ' + t + ' on ' + req.new_date + ' is taken by ' + clash.appointment_id) : ((doc ? doc.doctor_name : appt.doctor_id) + ' is not available at ' + t + ' on ' + req.new_date), { options: alts });\n  }\n  return Object.assign(out, { status: 'success', reason: 'rescheduled', write: true, new_date: req.new_date, new_time: t,\n    update: { appt_date: req.new_date, appt_time: t, erp_appt_time: t, status: 'rescheduled', updated_at: nowIso },\n    journey: { event_id: 'EVT-' + ts, patient_id: appt.patient_id, event_type: 'APPOINTMENT_RESCHEDULED', department: appt.department, actor: 'appointment_agent', status: 'completed', source_system: 'suvarna_erp', related_task: req.task_id, related_appointment: appt.appointment_id, related_resource: appt.doctor_id, sequence: 0, event_time: nowIso },\n    notification: { notification_id: 'NTF-' + ts, created_at_ts: nowIso, recipient_type: 'patient', recipient_ref: appt.patient_id, channel: 'in_app', message: 'Your appointment ' + appt.appointment_id + ' with ' + (doc ? doc.doctor_name : appt.doctor_id) + ' moved from ' + appt.appt_date + ' ' + appt.appt_time + ' to ' + req.new_date + ' ' + t + '.', source_agent: 'appointment_agent', severity: 'info', status: 'sent' } });\n})();\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "f22546b9-a735-4938-8a6e-9f40280d68fa",
+      "name": "Change Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        224
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "w",
+              "leftValue": "={{ $json.write }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "eb3b9fe1-e0ae-4ceb-8620-9b87cf862416",
+      "name": "Update Appointment in ERP",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        144
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "appointment_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Plan Change').first().json.req.appointment_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appt_date": "={{ $('Plan Change').first().json.update.appt_date }}",
+            "appt_time": "={{ $('Plan Change').first().json.update.appt_time }}",
+            "erp_appt_time": "={{ $('Plan Change').first().json.update.erp_appt_time }}",
+            "status": "={{ $('Plan Change').first().json.update.status }}",
+            "updated_at": "={{ $('Plan Change').first().json.update.updated_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "appt_date",
+              "displayName": "appt_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_time",
+              "displayName": "appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "erp_appt_time",
+              "displayName": "erp_appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "76294bc2-9886-4b53-a659-b923f62a0cff",
+      "name": "Log Journey Event",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1024,
+        144
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "9C2EsBnXy4kQxIy0",
+          "cachedResultName": "careos_journey_events"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "event_id": "={{ $('Plan Change').first().json.journey.event_id }}",
+            "patient_id": "={{ $('Plan Change').first().json.journey.patient_id }}",
+            "event_type": "={{ $('Plan Change').first().json.journey.event_type }}",
+            "department": "={{ $('Plan Change').first().json.journey.department }}",
+            "actor": "={{ $('Plan Change').first().json.journey.actor }}",
+            "status": "={{ $('Plan Change').first().json.journey.status }}",
+            "source_system": "={{ $('Plan Change').first().json.journey.source_system }}",
+            "related_task": "={{ $('Plan Change').first().json.journey.related_task }}",
+            "related_appointment": "={{ $('Plan Change').first().json.journey.related_appointment }}",
+            "related_resource": "={{ $('Plan Change').first().json.journey.related_resource }}",
+            "sequence": "={{ $('Plan Change').first().json.journey.sequence }}",
+            "event_time": "={{ $('Plan Change').first().json.journey.event_time }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "event_id",
+              "displayName": "event_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_type",
+              "displayName": "event_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_system",
+              "displayName": "source_system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_task",
+              "displayName": "related_task",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_appointment",
+              "displayName": "related_appointment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "related_resource",
+              "displayName": "related_resource",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sequence",
+              "displayName": "sequence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event_time",
+              "displayName": "event_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "9a15acc9-2f0c-4c74-aceb-ba5390c94a29",
+      "name": "Notify Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        144
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nRHJwV5ivDhi5d9y",
+          "cachedResultName": "careos_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "notification_id": "={{ $('Plan Change').first().json.notification.notification_id }}",
+            "created_at_ts": "={{ $('Plan Change').first().json.notification.created_at_ts }}",
+            "recipient_type": "={{ $('Plan Change').first().json.notification.recipient_type }}",
+            "recipient_ref": "={{ $('Plan Change').first().json.notification.recipient_ref }}",
+            "channel": "={{ $('Plan Change').first().json.notification.channel }}",
+            "message": "={{ $('Plan Change').first().json.notification.message }}",
+            "source_agent": "={{ $('Plan Change').first().json.notification.source_agent }}",
+            "severity": "={{ $('Plan Change').first().json.notification.severity }}",
+            "status": "={{ $('Plan Change').first().json.notification.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "notification_id",
+              "displayName": "notification_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at_ts",
+              "displayName": "created_at_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_type",
+              "displayName": "recipient_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_ref",
+              "displayName": "recipient_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_agent",
+              "displayName": "source_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "b661fae1-a4e0-4455-b1c1-f79cf9a6374f",
+      "name": "Build Audit Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const p = $('Plan Change').first().json;\nconst r = p.req;\nconst a = p.appt || {};\nconst base = { log_time: new Date().toISOString(), task_id: r.task_id, user_role: r.user_role, user_ref: r.user_ref, request: r.request_text || (r.action + ' ' + r.appointment_id + ' ' + r.new_date + ' ' + r.new_time).trim(), from_agent: r.from_agent, patient_id: a.patient_id || '' };\nconst actionName = r.action === 'cancel' ? 'cancel_appointment' : (r.action === 'reschedule' ? 'reschedule_appointment' : 'find_reschedule_slots');\nconst rows = [];\nif (p.write) {\n  rows.push(Object.assign({}, base, { to_agent: 'appointment_agent', action: actionName, system: 'suvarna_erp', result_status: 'success', result_summary: r.appointment_id + (p.reason === 'cancelled' ? ' cancelled (human confirmed)' : (' ' + a.appt_date + ' ' + a.appt_time + ' -> ' + p.new_date + ' ' + p.new_time)) }));\n  rows.push(Object.assign({}, base, { from_agent: 'appointment_agent', to_agent: 'notification', action: 'send_notification', system: 'careos_data_layer', result_status: 'success', result_summary: 'in_app notice to ' + a.patient_id }));\n} else {\n  rows.push(Object.assign({}, base, { to_agent: 'appointment_agent', action: actionName, system: 'suvarna_erp', result_status: p.status, result_summary: String(p.status === 'success' ? (p.options.length + ' slot options') : p.reason).slice(0, 480) }));\n}\nreturn rows.map(j => ({ json: j }));"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "fe600be0-22b9-4ed0-9429-0008092626df",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1552,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_time": "={{ $json.log_time }}",
+            "task_id": "={{ $json.task_id }}",
+            "user_role": "={{ $json.user_role }}",
+            "user_ref": "={{ $json.user_ref }}",
+            "request": "={{ $json.request }}",
+            "from_agent": "={{ $json.from_agent }}",
+            "to_agent": "={{ $json.to_agent }}",
+            "action": "={{ $json.action }}",
+            "system": "={{ $json.system }}",
+            "patient_id": "={{ $json.patient_id }}",
+            "result_status": "={{ $json.result_status }}",
+            "result_summary": "={{ $json.result_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_time",
+              "displayName": "log_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_role",
+              "displayName": "user_role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_ref",
+              "displayName": "user_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from_agent",
+              "displayName": "from_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "to_agent",
+              "displayName": "to_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_status",
+              "displayName": "result_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_summary",
+              "displayName": "result_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "507cf265-766e-4d02-b0d4-01ed007710fd",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1776,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const p = $('Plan Change').first().json;\nconst r = p.req;\nconst a = p.appt || {};\nconst result = {\n  appointment_id: r.appointment_id,\n  patient_id: a.patient_id || null,\n  doctor_id: a.doctor_id || null,\n  doctor_name: p.doctor_name || null,\n  old_date: a.appt_date || null,\n  old_time: a.appt_time || null,\n  new_date: p.new_date || null,\n  new_time: p.new_time || null,\n  options: p.options || []\n};\nif (p.status !== 'success' || p.reason === 'options') result.message = p.reason;\nif (p.conflict) result.conflict = p.conflict;\nif (p.write) { result.appointment_status = p.update.status; result.notification = p.notification.message; }\nreturn [{ json: { task_id: r.task_id, agent: 'appointment_agent', status: p.status, result: result, _channel: r.channel } }];"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "d4a651f1-585e-4d24-a120-52186d782480",
+      "name": "Called via Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c",
+              "leftValue": "={{ $json._channel }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "4a643ee7-a798-4c60-ac82-a98eef5f9988",
+      "name": "Respond to Caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2224,
+        224
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}",
+        "options": {
+          "responseCode": "={{ ({ forbidden: 403, not_found: 404, error: 400, slot_taken: 409, conflict_detected: 409, confirmation_required: 202 })[$json.status] || 200 }}"
+        }
+      }
+    },
+    {
+      "id": "dd287062-ae7c-4b62-b672-86e88547cf22",
+      "name": "Return to Agent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2224,
+        416
+      ],
+      "parameters": {
+        "mode": "raw",
+        "includeOtherFields": false,
+        "options": {},
+        "jsonOutput": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Get Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Appointment": {
+      "main": [
+        [
+          {
+            "node": "Get Doctor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Doctor": {
+      "main": [
+        [
+          {
+            "node": "Get Doctor Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Doctor Appointments": {
+      "main": [
+        [
+          {
+            "node": "Plan Change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan Change": {
+      "main": [
+        [
+          {
+            "node": "Change Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change Approved?": {
+      "main": [
+        [
+          {
+            "node": "Update Appointment in ERP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Appointment in ERP": {
+      "main": [
+        [
+          {
+            "node": "Log Journey Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Journey Event": {
+      "main": [
+        [
+          {
+            "node": "Notify Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Patient": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Audit Rows": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Called via Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called via Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return to Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

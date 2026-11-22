@@ -1,0 +1,1678 @@
+{
+  "name": "CareOS · Department Agent Gateway",
+  "nodes": [
+    {
+      "id": "8a166f74-2df9-4f12-bfc3-a8be3af45649",
+      "name": "When Called by Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "task_id",
+              "type": "string"
+            },
+            {
+              "name": "from_agent",
+              "type": "string"
+            },
+            {
+              "name": "to_agent",
+              "type": "string"
+            },
+            {
+              "name": "requested_action",
+              "type": "string"
+            },
+            {
+              "name": "patient_id",
+              "type": "string"
+            },
+            {
+              "name": "department",
+              "type": "string"
+            },
+            {
+              "name": "doctor_id",
+              "type": "string"
+            },
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "user_role",
+              "type": "string"
+            },
+            {
+              "name": "user_ref",
+              "type": "string"
+            },
+            {
+              "name": "request_text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4adc3239-6db3-4e08-a52d-07807731ed70",
+      "name": "Check Permissions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        1744
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst isWebhook = !!(raw.body && typeof raw.body === 'object' && raw.headers);\nconst src = isWebhook ? raw.body : raw;\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nconst req = {\n  channel: isWebhook ? 'webhook' : 'tool',\n  task_id: s(src.task_id) || ('TASK-' + Date.now()),\n  from_agent: s(src.from_agent) || 'orchestrator',\n  to_agent: s(src.to_agent).toLowerCase(),\n  requested_action: s(src.requested_action).toLowerCase(),\n  patient_id: s(src.patient_id).toUpperCase(),\n  department: s(src.department),\n  doctor_id: s(src.doctor_id).toUpperCase(),\n  date: s(src.date),\n  user_role: s(src.user_role).toLowerCase(),\n  user_ref: s(src.user_ref),\n  request_text: s(src.request_text)\n};\n\n// action catalog: route index, permission category, patient-scoped\nconst CATALOG = {\n  'journey_agent/get_journey':            { route: 0,  cat: 'journey',     needs: 'patient_id' },\n  'queue_agent/get_queue_status':         { route: 1,  cat: 'queue',       needs: 'department' },\n  'appointment_agent/search_doctors':     { route: 2,  cat: 'appointment', needs: '' },\n  'appointment_agent/get_appointments':   { route: 3,  cat: 'appointment', needs: 'patient_or_doctor' },\n  'doctor_agent/get_doctor_worklist':     { route: 4,  cat: 'clinical',    needs: 'doctor_id' },\n  'lab_agent/get_lab_status':             { route: 5,  cat: 'clinical',    needs: '' },\n  'radiology_agent/get_imaging_status':   { route: 5,  cat: 'clinical',    needs: '' },\n  'pharmacy_agent/get_pharmacy_status':   { route: 6,  cat: 'pharmacy',    needs: 'patient_id' },\n  'billing_agent/get_billing_status':     { route: 7,  cat: 'billing',     needs: 'patient_id' },\n  'insurance_agent/get_insurance_status': { route: 8,  cat: 'insurance',   needs: 'patient_id' },\n  'discharge_agent/get_discharge_status': { route: 9,  cat: 'discharge',   needs: 'patient_id' },\n  'bed_agent/get_bed_status':             { route: 10, cat: 'bed',         needs: '' },\n  'resource_agent/get_resources':         { route: 10, cat: 'bed',         needs: '' },\n  'nursing_agent/get_nursing_tasks':      { route: 11, cat: 'nursing',     needs: 'nurse_ref' },\n  'bottleneck_agent/get_bottlenecks':     { route: 12, cat: 'bottleneck',  needs: '' },\n  'operations_agent/get_operations_summary': { route: 13, cat: 'operations', needs: '' },\n  'finance_agent/get_finance_summary':    { route: 14, cat: 'finance',     needs: '' },\n  'operations_agent/get_agent_activity':  { route: 15, cat: 'activity',    needs: '' }\n};\nconst ALL_NON_FINANCE = ['journey','queue','appointment','clinical','pharmacy','billing','insurance','discharge','bed','nursing','bottleneck','operations','activity'];\nconst ROLE_CATS = {\n  patient:    ['journey','queue','appointment','pharmacy','billing','insurance','discharge'],\n  nurse:      ['journey','queue','appointment','clinical','pharmacy','discharge','bed','nursing','bottleneck'],\n  doctor:     ['journey','queue','appointment','clinical','pharmacy','discharge','bed','bottleneck'],\n  operations: ALL_NON_FINANCE,\n  admin:      ALL_NON_FINANCE.concat(['finance']),\n  finance:    ['finance','billing','insurance']\n};\nconst ERP_CATS = ['billing','insurance','finance','pharmacy'];\n\nconst key = req.to_agent + '/' + req.requested_action;\nconst entry = CATALOG[key];\nlet decision = 'allowed';\nlet reason = '';\nlet result = {};\nif (!entry) {\n  decision = 'error';\n  reason = 'unknown action ' + key;\n  result = { reason: reason, supported_actions: Object.keys(CATALOG) };\n} else {\n  const allowedCats = ROLE_CATS[req.user_role];\n  if (!allowedCats) {\n    decision = 'forbidden';\n    reason = 'unknown or missing user_role \"' + req.user_role + '\"';\n  } else if (allowedCats.indexOf(entry.cat) === -1) {\n    decision = 'forbidden';\n    reason = 'role ' + req.user_role + ' may not use ' + key + (entry.cat === 'finance' ? ' (finance data restricted to admin/finance)' : '');\n  } else if (req.user_role === 'patient') {\n    const self = req.user_ref.toUpperCase();\n    if (!self) { decision = 'forbidden'; reason = 'patient identity (user_ref) missing'; }\n    else if (req.patient_id && req.patient_id !== self) { decision = 'forbidden'; reason = 'patients may only access their own records'; }\n    else { req.patient_id = self; }\n  }\n  if (decision === 'allowed') {\n    if (entry.needs === 'doctor_id' && !req.doctor_id && req.user_role === 'doctor') req.doctor_id = req.user_ref.toUpperCase();\n    if (entry.needs === 'nurse_ref' && !req.user_ref) { decision = 'error'; reason = 'user_ref (nurse id) required'; }\n    if (entry.needs === 'patient_id' && !req.patient_id) { decision = 'error'; reason = 'patient_id required'; }\n    if (entry.needs === 'department' && !req.department) { decision = 'error'; reason = 'department required'; }\n    if (entry.needs === 'doctor_id' && !req.doctor_id) { decision = 'error'; reason = 'doctor_id required'; }\n    if (entry.needs === 'patient_or_doctor' && !req.patient_id && !req.doctor_id) { decision = 'error'; reason = 'patient_id or doctor_id required'; }\n    if (decision === 'error') result = { reason: reason };\n  }\n  if (decision === 'forbidden') result = { reason: reason };\n}\nreq.decision = decision;\nreq.reason = reason;\nreq.rejection_result = result;\nreq.category = entry ? entry.cat : '';\nreq.system = entry && ERP_CATS.indexOf(entry.cat) !== -1 ? 'suvarna_erp' : 'careos_data_layer';\nreq.route = decision === 'allowed' ? entry.route : 16;\nreturn [{ json: req }];"
+      }
+    },
+    {
+      "id": "0a99c24c-c8f1-4d20-9f35-906f1045f1fc",
+      "name": "Agent Gateway Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "careos/agent-gateway",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "beddd642-11f9-4d1f-a45e-43b4a6e1839e"
+    },
+    {
+      "id": "f43104c8-1840-44f5-94e4-171c27f7f3fc",
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        1504
+      ],
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 17,
+        "output": "={{ $json.route }}"
+      }
+    },
+    {
+      "id": "2b296951-9e71-49bd-872e-4002a5f15ac2",
+      "name": "Journey: Get Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "eda2ebbb-635f-425e-b79b-2f0687ae55b7",
+      "name": "Journey: Get Events",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "9C2EsBnXy4kQxIy0",
+          "cachedResultName": "careos_journey_events"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ff403c14-d3f2-48ec-a382-95ac758476c7",
+      "name": "Compute Agent Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        1664
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Check Permissions').first().json;\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rows = (name, keyCol) => {\n  try { return $(name).all().map(i => i.json).filter(r => r && r[keyCol] !== undefined && r[keyCol] !== null && r[keyCol] !== '').map(clean); }\n  catch (e) { return []; }\n};\nconst todayIST = $now.setZone('Asia/Kolkata').toISODate();\nconst countBy = (arr, f) => { const o = {}; for (const r of arr) { const k = f(r) || 'unknown'; o[k] = (o[k] || 0) + 1; } return o; };\nconst SEV = { critical: 0, high: 1, medium: 2, low: 3 };\nconst sortBottlenecks = (arr) => arr.slice().sort((a, b) => ((SEV[a.severity] ?? 9) - (SEV[b.severity] ?? 9)) || ((b.impact_patients || 0) - (a.impact_patients || 0)));\nconst label = (t) => { const base = String(t || '').replace(/_COMPLETED$|_BOOKED$/, ''); return base.split('_').map(w => w === 'MRI' || w === 'CT' || w === 'ICU' ? w : w.charAt(0) + w.slice(1).toLowerCase()).join(' '); };\nconst queueEstimate = (q, ahead) => Math.ceil(ahead * (q.avg_consult_minutes || 0) / Math.max(q.active_doctors || 0, 1)) + (q.current_delay_minutes || 0);\nconst hoursSince = (iso) => iso ? Math.round((Date.now() - new Date(iso).getTime()) / 36e5 * 10) / 10 : null;\n\nlet status = 'success';\nlet result = {};\nlet summary = '';\nconst key = req.to_agent + '/' + req.requested_action;\n\nswitch (req.route) {\n  case 0: {\n    const patient = rows('Journey: Get Patient', 'patient_id')[0];\n    const events = rows('Journey: Get Events', 'event_id').sort((a, b) => (a.sequence || 0) - (b.sequence || 0));\n    if (!patient) { status = 'not_found'; result = { reason: 'patient ' + req.patient_id + ' not found' }; summary = result.reason; break; }\n    const steps = events.map(e => ({ step: label(e.event_type), event_type: e.event_type, status: e.status, department: e.department, actor: e.actor, related_task: e.related_task, related_resource: e.related_resource, event_time: e.event_time, sequence: e.sequence }));\n    const completed = steps.filter(s => s.status === 'completed');\n    const notStarted = steps.filter(s => s.status === 'not_started');\n    const pending = steps.filter(s => s.status !== 'completed' && s.status !== 'not_started');\n    const blocker = pending[0] || null;\n    const next = blocker ? blocker : (notStarted[0] || null);\n    result = {\n      patient: { patient_id: patient.patient_id, patient_name: patient.patient_name, age: patient.age, department: patient.department, attending_doctor_id: patient.attending_doctor_id, admission_status: patient.admission_status, bed_id: patient.bed_id, assigned_nurse: patient.assigned_nurse },\n      current_stage: blocker ? blocker.step : (completed.length ? completed[completed.length - 1].step : patient.current_stage),\n      completed_steps: completed.map(s => s.step),\n      pending_steps: pending.map(s => s.step),\n      not_started_steps: notStarted.map(s => s.step),\n      primary_blocker: blocker ? { step: blocker.step, status: blocker.status, owner: blocker.actor, department: blocker.department, related_task: blocker.related_task, waiting_since: blocker.event_time, waiting_hours: hoursSince(blocker.event_time) } : null,\n      next_action: next ? (blocker ? 'Complete ' + blocker.step + ' (owner ' + blocker.actor + (blocker.related_task ? ', ' + blocker.related_task : '') + ')' : 'Start ' + next.step + ' (owner ' + next.actor + ')') : 'Journey complete',\n      timeline: steps\n    };\n    if (!events.length) result.note = 'no journey events recorded';\n    summary = patient.patient_name + ': ' + completed.length + ' done, blocker ' + (blocker ? blocker.step + ' ' + blocker.status : 'none');\n    break;\n  }\n  case 1: {\n    const qs = rows('Queue: Get Department Queue', 'department'); const q = qs.find(r => String(r.department).toLowerCase() === req.department.toLowerCase()) || qs[0];\n    if (!q) { status = 'not_found'; result = { reason: 'no queue for department ' + req.department }; summary = result.reason; break; }\n    let ahead = q.patients_waiting || 0;\n    let basis = 'patients_waiting';\n    let token = null;\n    const appts = rows('Queue: Get Patient Appointments', 'appointment_id').filter(a => a.appt_date === todayIST && a.queue_token && String(a.department || '').toLowerCase() === String(q.department).toLowerCase() && a.status !== 'completed' && a.status !== 'cancelled');\n    if (appts.length) {\n      token = appts[0].queue_token;\n      const n = parseInt(String(token).replace(/\\D/g, ''), 10);\n      if (!isNaN(n)) { ahead = Math.max(n - (q.current_token || 0), 0); basis = 'patient token ' + token; }\n    }\n    const est = queueEstimate(q, ahead);\n    result = { department: q.department, current_token: (q.token_prefix || '') + q.current_token, last_token_issued: (q.token_prefix || '') + q.last_token_issued, patients_waiting: q.patients_waiting, patient_token: token, patients_ahead: ahead, basis: basis, avg_consult_minutes: q.avg_consult_minutes, active_doctors: q.active_doctors, current_delay_minutes: q.current_delay_minutes, estimated_wait_minutes: est, abnormal: est > 45, formula: 'ceil(' + ahead + ' x ' + q.avg_consult_minutes + ' / ' + Math.max(q.active_doctors || 0, 1) + ') + ' + q.current_delay_minutes, updated_at: q.updated_at };\n    summary = q.department + ': ' + ahead + ' ahead, ~' + est + ' min' + (est > 45 ? ' (ABNORMAL)' : '');\n    break;\n  }\n  case 2: {\n    const docs = rows('Appointments: Search Doctors', 'doctor_id').map(d => ({ doctor_id: d.doctor_id, doctor_name: d.doctor_name, department: d.department, specialization: d.specialization, status: d.status, available_days: d.available_days, shift_start: d.shift_start, shift_end: d.shift_end, slot_minutes: d.slot_minutes }));\n    if (!docs.length) { status = 'not_found'; result = { reason: 'no doctors found' + (req.department ? ' for ' + req.department : ''), doctors: [] }; summary = result.reason; break; }\n    result = { department: req.department || 'all', doctors: docs, available_now: docs.filter(d => d.status === 'available' || d.status === 'on_duty').length };\n    summary = docs.length + ' doctors found';\n    break;\n  }\n  case 3: {\n    let appts = rows('Appointments: Get Appointments', 'appointment_id');\n    if (req.patient_id) appts = appts.filter(a => a.patient_id === req.patient_id);\n    if (req.doctor_id) appts = appts.filter(a => a.doctor_id === req.doctor_id);\n    if (req.date) appts = appts.filter(a => a.appt_date === req.date);\n    appts.sort((a, b) => (a.appt_date + a.appt_time).localeCompare(b.appt_date + b.appt_time));\n    if (!appts.length) { status = 'not_found'; result = { reason: 'no appointments match', appointments: [] }; summary = result.reason; break; }\n    result = { appointments: appts, erp_time_mismatches: appts.filter(a => a.erp_appt_time && a.erp_appt_time !== a.appt_time).map(a => a.appointment_id) };\n    summary = appts.length + ' appointments';\n    break;\n  }\n  case 4: {\n    const doc = rows('Doctor: Get Doctor', 'doctor_id')[0];\n    if (!doc) { status = 'not_found'; result = { reason: 'doctor ' + req.doctor_id + ' not found' }; summary = result.reason; break; }\n    const patients = rows('Doctor: Get Patients', 'patient_id').map(p => ({ patient_id: p.patient_id, patient_name: p.patient_name, current_stage: p.current_stage, admission_status: p.admission_status, bed_id: p.bed_id }));\n    const pendingReviews = rows('Doctor: Get Diagnostics', 'order_id').filter(d => d.review_status === 'pending').map(d => ({ order_id: d.order_id, patient_id: d.patient_id, test_name: d.test_name, status: d.status, completed_at: d.completed_at, waiting_hours: hoursSince(d.completed_at) }));\n    const day = req.date || todayIST;\n    const appts = rows('Doctor: Get Appointments', 'appointment_id').filter(a => a.appt_date === day).sort((a, b) => String(a.appt_time).localeCompare(String(b.appt_time)));\n    result = { doctor: { doctor_id: doc.doctor_id, doctor_name: doc.doctor_name, department: doc.department, status: doc.status, shift: doc.shift_start + '-' + doc.shift_end }, patients: patients, pending_reviews: pendingReviews, appointments_date: day, appointments: appts };\n    summary = doc.doctor_name + ': ' + patients.length + ' patients, ' + pendingReviews.length + ' pending reviews, ' + appts.length + ' appts on ' + day;\n    break;\n  }\n  case 5: {\n    let orders = rows('Diagnostics: Get Orders', 'order_id');\n    if (req.patient_id) orders = orders.filter(o => o.patient_id === req.patient_id);\n    if (!orders.length) { status = 'not_found'; result = { reason: 'no ' + (req.to_agent === 'lab_agent' ? 'lab' : 'imaging') + ' orders found' + (req.patient_id ? ' for ' + req.patient_id : '') }; summary = result.reason; break; }\n    const withTat = orders.map(o => Object.assign({}, o, { turnaround_hours: (o.ordered_at && o.completed_at) ? Math.round((new Date(o.completed_at) - new Date(o.ordered_at)) / 36e5 * 10) / 10 : null, review_wait_hours: (o.review_status === 'pending' && o.completed_at) ? hoursSince(o.completed_at) : null }));\n    const tats = withTat.map(o => o.turnaround_hours).filter(v => v !== null);\n    result = { category: req.to_agent === 'lab_agent' ? 'lab' : 'imaging', orders: withTat, by_status: countBy(withTat, o => o.status), pending_reviews: withTat.filter(o => o.review_status === 'pending').map(o => ({ order_id: o.order_id, patient_id: o.patient_id, test_name: o.test_name, ordering_doctor_id: o.ordering_doctor_id, review_wait_hours: o.review_wait_hours })), avg_turnaround_hours: tats.length ? Math.round(tats.reduce((a, b) => a + b, 0) / tats.length * 10) / 10 : null };\n    summary = orders.length + ' orders, ' + result.pending_reviews.length + ' pending review';\n    break;\n  }\n  case 6: case 7: case 8: case 9: {\n    const map = { 6: ['Pharmacy: Get Prescriptions', 'rx_id', 'prescriptions'], 7: ['Billing: Get Bills', 'bill_id', 'bills'], 8: ['Insurance: Get Authorizations', 'auth_id', 'authorizations'], 9: ['Discharge: Get Checklist', 'patient_id', 'discharge'] };\n    const m = map[req.route];\n    const data = rows(m[0], m[1]);\n    if (!data.length) { status = 'not_found'; result = { reason: 'no ' + m[2] + ' record for ' + req.patient_id }; summary = result.reason; break; }\n    if (req.route === 9) {\n      const d = data[0];\n      const checks = { doctor_clearance: d.doctor_clearance, billing_clearance: d.billing_clearance, pharmacy_clearance: d.pharmacy_clearance, insurance_clearance: d.insurance_clearance, summary_status: d.summary_status, transport_status: d.transport_status, bed_release_status: d.bed_release_status };\n      const done = ['cleared', 'completed', 'approved', 'ready', 'released', 'not_required', 'done', 'arranged'];\n      const outstanding = Object.keys(checks).filter(k => done.indexOf(String(checks[k]).toLowerCase()) === -1).map(k => ({ item: k, status: checks[k] }));\n      result = { patient_id: d.patient_id, checklist: checks, outstanding_items: outstanding, ready_for_discharge: outstanding.length === 0, planned_discharge_at: d.planned_discharge_at };\n      summary = outstanding.length ? outstanding.length + ' discharge items outstanding' : 'ready for discharge';\n    } else {\n      result = { patient_id: req.patient_id, source: req.system }; result[m[2]] = data;\n      if (req.route === 7) summary = data.map(b => b.bill_id + ' ' + b.billing_status + ' outstanding ' + b.outstanding_amount).join('; ');\n      else if (req.route === 8) summary = data.map(a => a.auth_id + ' ' + a.insurer + ' ' + a.auth_status).join('; ');\n      else summary = data.map(r => r.rx_id + ' ' + r.rx_status + '/' + r.stock_status).join('; ');\n    }\n    break;\n  }\n  case 10: {\n    let res = rows('Resources: Get All', 'resource_id');\n    if (req.department) res = res.filter(r => String(r.department || '').toLowerCase().includes(req.department.toLowerCase()) || String(r.resource_type || '').toLowerCase().includes(req.department.toLowerCase()));\n    if (req.to_agent === 'bed_agent') res = res.filter(r => /bed|icu/i.test(r.resource_type));\n    if (!res.length) { status = 'not_found'; result = { reason: 'no resources found' }; summary = result.reason; break; }\n    const byType = {};\n    for (const r of res) { byType[r.resource_type] = byType[r.resource_type] || {}; byType[r.resource_type][r.status] = (byType[r.resource_type][r.status] || 0) + 1; }\n    const beds = res.filter(r => /bed/i.test(r.resource_type));\n    const icu = res.filter(r => /icu/i.test(r.resource_type));\n    result = { counts_by_type_status: byType, available_beds: beds.filter(r => r.status === 'available').length, total_beds: beds.length, icu_available: icu.filter(r => r.status === 'available').length, icu_total: icu.length, equipment_queues: res.filter(r => (r.queue_length || 0) > 0).map(r => ({ resource_id: r.resource_id, resource_type: r.resource_type, status: r.status, queue_length: r.queue_length, next_available: r.next_available })).sort((a, b) => b.queue_length - a.queue_length), resources: res };\n    summary = result.available_beds + '/' + result.total_beds + ' beds free, ICU ' + result.icu_available + '/' + result.icu_total;\n    break;\n  }\n  case 11: {\n    const pts = rows('Nursing: Get Assigned Patients', 'patient_id');\n    if (!pts.length) { status = 'not_found'; result = { reason: 'no patients assigned to ' + req.user_ref }; summary = result.reason; break; }\n    const ids = pts.map(p => p.patient_id);\n    const open = rows('Nursing: Get Open Journey Steps', 'event_id').filter(e => ids.indexOf(e.patient_id) !== -1);\n    result = { nurse: req.user_ref, patients: pts.map(p => ({ patient_id: p.patient_id, patient_name: p.patient_name, bed_id: p.bed_id, current_stage: p.current_stage, admission_status: p.admission_status, pending_items: open.filter(e => e.patient_id === p.patient_id).sort((a, b) => a.sequence - b.sequence).map(e => ({ step: label(e.event_type), status: e.status, owner: e.actor })) })) };\n    summary = pts.length + ' assigned patients';\n    break;\n  }\n  case 12: {\n    const bn = sortBottlenecks(rows('Bottlenecks: Get Open', 'bottleneck_id'));\n    if (!bn.length) { status = 'not_found'; result = { reason: 'no open bottlenecks', bottlenecks: [] }; summary = result.reason; break; }\n    result = { open_count: bn.length, bottlenecks: bn };\n    summary = bn.length + ' open bottlenecks, top ' + bn[0].bottleneck_id;\n    break;\n  }\n  case 13: {\n    const pts = rows('Ops: Get Patients', 'patient_id');\n    const appts = rows('Ops: Get Appointments', 'appointment_id').filter(a => a.appt_date === todayIST);\n    const queues = rows('Ops: Get Queues', 'department').map(q => ({ department: q.department, patients_waiting: q.patients_waiting, estimated_wait_minutes: queueEstimate(q, q.patients_waiting || 0), abnormal: queueEstimate(q, q.patients_waiting || 0) > 45 })).sort((a, b) => b.estimated_wait_minutes - a.estimated_wait_minutes);\n    const res = rows('Ops: Get Resources', 'resource_id');\n    const beds = res.filter(r => /bed/i.test(r.resource_type));\n    const icu = res.filter(r => /icu/i.test(r.resource_type));\n    const bn = sortBottlenecks(rows('Ops: Get Open Bottlenecks', 'bottleneck_id'));\n    result = { date: todayIST, active_patients: pts.filter(p => p.admission_status !== 'discharged').length, patients_by_admission_status: countBy(pts, p => p.admission_status), todays_appointments: appts.length, todays_appointments_by_status: countBy(appts, a => a.status), queues_by_wait: queues, beds: { available: beds.filter(r => r.status === 'available').length, total: beds.length, by_status: countBy(beds, r => r.status) }, icu: { available: icu.filter(r => r.status === 'available').length, total: icu.length }, open_bottlenecks: bn.map(b => ({ bottleneck_id: b.bottleneck_id, affected: b.affected, severity: b.severity, impact_patients: b.impact_patients, owner: b.owner })) };\n    summary = result.active_patients + ' active patients, ' + appts.length + ' appts today, ' + bn.length + ' open bottlenecks';\n    break;\n  }\n  case 14: {\n    const f = rows('Finance: Get Summary Rows', 'department');\n    if (!f.length) { status = 'not_found'; result = { reason: 'no finance data' }; summary = result.reason; break; }\n    const t = { revenue: 0, expenses: 0, outstanding_receivables: 0, payments_collected: 0 };\n    for (const r of f) { t.revenue += r.revenue || 0; t.expenses += r.expenses || 0; t.outstanding_receivables += r.outstanding_receivables || 0; t.payments_collected += r.payments_collected || 0; }\n    t.operating_margin = t.revenue - t.expenses;\n    result = { period: f[0].period, totals: t, departments: f };\n    summary = 'finance ' + f[0].period + ' revenue ' + t.revenue;\n    break;\n  }\n  case 15: {\n    const a = rows('Activity: Get Latest Audit', 'log_time');\n    if (!a.length) { status = 'not_found'; result = { reason: 'no agent activity logged yet', activity: [] }; summary = result.reason; break; }\n    result = { count: a.length, activity: a };\n    summary = a.length + ' recent audit rows';\n    break;\n  }\n  default: {\n    status = 'error'; result = { reason: 'unroutable action ' + key }; summary = result.reason;\n  }\n}\nreturn [{ json: {\n  response: { task_id: req.task_id, agent: req.to_agent, action: req.requested_action, status: status, result: result },\n  audit: { task_id: req.task_id, user_role: req.user_role, user_ref: req.user_ref, request: req.request_text, from_agent: req.from_agent, to_agent: req.to_agent, action: req.requested_action, system: req.system, patient_id: req.patient_id, result_status: status, result_summary: String(summary).slice(0, 480) },\n  channel: req.channel\n} }];"
+      }
+    },
+    {
+      "id": "74177315-2ddc-42bf-9123-697362ee9e9d",
+      "name": "Queue: Get Department Queue",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        416
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0aWu6KWa0lSkTaSS",
+          "cachedResultName": "careos_queues"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "department",
+              "condition": "ilike",
+              "keyValue": "={{ $('Check Permissions').first().json.department }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "73e13521-d47b-436e-832d-032de5d7574c",
+      "name": "Queue: Get Patient Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        416
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e0175b6d-d479-4b9f-809f-5b103ab2a214",
+      "name": "Appointments: Search Doctors",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        608
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "department",
+              "condition": "ilike",
+              "keyValue": "={{ $('Check Permissions').first().json.department || '%' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7db7045c-2e09-436e-a658-eecc9fcbe7b2",
+      "name": "Appointments: Get Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "bf2289da-9980-47dc-8fae-d27856084921",
+      "name": "Doctor: Get Doctor",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        992
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.doctor_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "0ac195cb-68cc-4ab4-9e73-83c9f4237bf9",
+      "name": "Doctor: Get Patients",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        992
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "attending_doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.doctor_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "8475019d-86ac-4310-8143-551043fe6e8e",
+      "name": "Doctor: Get Diagnostics",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        992
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "7Vfz2HWKXSdeTXtH",
+          "cachedResultName": "careos_diagnostics"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ordering_doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.doctor_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b810e1c6-3e41-46f8-9b4e-3c4dfc81d579",
+      "name": "Doctor: Get Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        992
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.doctor_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "42eca041-3fc8-48dd-954b-404f73284919",
+      "name": "Diagnostics: Get Orders",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        1184
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "7Vfz2HWKXSdeTXtH",
+          "cachedResultName": "careos_diagnostics"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "category",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.to_agent === 'lab_agent' ? 'lab' : 'imaging' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e04ca744-b506-43ce-b3f4-08b5c4768a0e",
+      "name": "Pharmacy: Get Prescriptions",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        1376
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "UTwiiaXEfwyFp6Qa",
+          "cachedResultName": "careos_pharmacy"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "9133e420-019a-4279-bbf2-179644b762c4",
+      "name": "Billing: Get Bills",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        1568
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "oFaKx2Nxh7zGkaqR",
+          "cachedResultName": "careos_billing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d2d920d1-1e94-4ddf-8262-285f34bc7e80",
+      "name": "Insurance: Get Authorizations",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        1760
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "zU5f30Jv8jEF8zxh",
+          "cachedResultName": "careos_insurance"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dbfe364c-5f32-430d-ad4e-19cc42eee1ad",
+      "name": "Discharge: Get Checklist",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        1952
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "liKwLLS4NqhcpeU1",
+          "cachedResultName": "careos_discharge"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.patient_id }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "7355d9e3-f38b-4ecf-82f9-43372a7d15eb",
+      "name": "Resources: Get All",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        2144
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ujvBEqPWnzNl3JyK",
+          "cachedResultName": "careos_resources"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "bceb9bea-47b9-4ff1-864e-fdb578d33bbc",
+      "name": "Nursing: Get Assigned Patients",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        2336
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "assigned_nurse",
+              "condition": "eq",
+              "keyValue": "={{ $('Check Permissions').first().json.user_ref }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "94d062af-adc9-4841-ab5e-febbc5ef2d5b",
+      "name": "Nursing: Get Open Journey Steps",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        2336
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "9C2EsBnXy4kQxIy0",
+          "cachedResultName": "careos_journey_events"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "neq",
+              "keyValue": "={{ 'completed' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e360e67b-e290-410f-a977-00919190977d",
+      "name": "Bottlenecks: Get Open",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        2528
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "t9RenMeEhNmYowc6",
+          "cachedResultName": "careos_bottlenecks"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "={{ 'open' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "1217e1a8-b0ed-424b-ab5a-af55c343d903",
+      "name": "Ops: Get Patients",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        2720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "d17c28af-8da1-44b7-8e41-abf8a6385131",
+      "name": "Ops: Get Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        2720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "136ea72b-aaa7-4c93-b6bd-332b3d6de937",
+      "name": "Ops: Get Queues",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        2720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0aWu6KWa0lSkTaSS",
+          "cachedResultName": "careos_queues"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "2b0503c4-f8dd-40b6-9974-963bd3896a7e",
+      "name": "Ops: Get Resources",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        2720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ujvBEqPWnzNl3JyK",
+          "cachedResultName": "careos_resources"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "3afc1298-6cc7-498f-8531-12ba5f8e51bd",
+      "name": "Ops: Get Open Bottlenecks",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        2720
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "t9RenMeEhNmYowc6",
+          "cachedResultName": "careos_bottlenecks"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "={{ 'open' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "00b62982-afe2-45e0-adf3-e8f43ec3dadd",
+      "name": "Finance: Get Summary Rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        2912
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "A6PoavQF7PmTxQLE",
+          "cachedResultName": "careos_finance"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b0081339-1366-4d45-860f-1bad7e297b54",
+      "name": "Activity: Get Latest Audit",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        3104
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "limit": 20,
+        "orderBy": true,
+        "orderByColumn": "createdAt",
+        "orderByDirection": "DESC"
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "179571b6-52eb-4506-bb23-a63216a9feab",
+      "name": "Build Rejection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        3248
+      ],
+      "parameters": {
+        "jsCode": "const req = $input.first().json;\nreturn [{ json: {\n  response: { task_id: req.task_id, agent: req.to_agent, action: req.requested_action, status: req.decision, result: req.rejection_result },\n  audit: { task_id: req.task_id, user_role: req.user_role, user_ref: req.user_ref, request: req.request_text, from_agent: req.from_agent, to_agent: req.to_agent || 'unknown', action: req.requested_action, system: req.system, patient_id: req.patient_id, result_status: req.decision, result_summary: String(req.reason).slice(0, 480) },\n  channel: req.channel\n} }];"
+      }
+    },
+    {
+      "id": "ab49d644-47ec-475d-90a2-16e59c018ad7",
+      "name": "Collect Response",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        2416
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "fb32e3a7-75de-4d2e-8ab8-e523e2166985",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_time": "={{ $now.toISO() }}",
+            "task_id": "={{ $json.audit.task_id }}",
+            "user_role": "={{ $json.audit.user_role }}",
+            "user_ref": "={{ $json.audit.user_ref }}",
+            "request": "={{ $json.audit.request }}",
+            "from_agent": "={{ $json.audit.from_agent }}",
+            "to_agent": "={{ $json.audit.to_agent }}",
+            "action": "={{ $json.audit.action }}",
+            "system": "={{ $json.audit.system }}",
+            "patient_id": "={{ $json.audit.patient_id }}",
+            "result_status": "={{ $json.audit.result_status }}",
+            "result_summary": "={{ $json.audit.result_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_time",
+              "displayName": "log_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_role",
+              "displayName": "user_role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_ref",
+              "displayName": "user_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from_agent",
+              "displayName": "from_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "to_agent",
+              "displayName": "to_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_status",
+              "displayName": "result_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_summary",
+              "displayName": "result_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "0a17bdc4-e81b-4ea4-8af5-292671339f50",
+      "name": "Agent Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const c = $('Collect Response').first().json;\nreturn [{ json: Object.assign({}, c.response, { _channel: c.channel }) }];"
+      }
+    },
+    {
+      "id": "1232d5f4-52f2-4184-917a-c3ab85ec141b",
+      "name": "Called via Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1248,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ch",
+              "leftValue": "={{ $json._channel }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "7b3de602-40f3-419f-93fd-c89a32873b8c",
+      "name": "Respond to Caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1472,
+        224
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, action: $json.action, status: $json.status, result: $json.result }) }}",
+        "options": {
+          "responseCode": "={{ $json.status === 'forbidden' ? 403 : ($json.status === 'not_found' ? 404 : ($json.status === 'error' ? 400 : 200)) }}"
+        }
+      }
+    },
+    {
+      "id": "0148f8bc-6534-410f-bbf1-8bdf31cb5849",
+      "name": "Return to Agent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        416
+      ],
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, action: $json.action, status: $json.status, result: $json.result }) }}",
+        "includeOtherFields": false,
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Agent": {
+      "main": [
+        [
+          {
+            "node": "Check Permissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Permissions": {
+      "main": [
+        [
+          {
+            "node": "Route by Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent Gateway Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Permissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action": {
+      "main": [
+        [
+          {
+            "node": "Journey: Get Patient",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue: Get Department Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Appointments: Search Doctors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Appointments: Get Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Doctor: Get Doctor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Diagnostics: Get Orders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pharmacy: Get Prescriptions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Billing: Get Bills",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insurance: Get Authorizations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discharge: Get Checklist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resources: Get All",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nursing: Get Assigned Patients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bottlenecks: Get Open",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ops: Get Patients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finance: Get Summary Rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Activity: Get Latest Audit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Rejection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Journey: Get Patient": {
+      "main": [
+        [
+          {
+            "node": "Journey: Get Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Journey: Get Events": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Agent Result": {
+      "main": [
+        [
+          {
+            "node": "Collect Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue: Get Department Queue": {
+      "main": [
+        [
+          {
+            "node": "Queue: Get Patient Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue: Get Patient Appointments": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointments: Search Doctors": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointments: Get Appointments": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doctor: Get Doctor": {
+      "main": [
+        [
+          {
+            "node": "Doctor: Get Patients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doctor: Get Patients": {
+      "main": [
+        [
+          {
+            "node": "Doctor: Get Diagnostics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doctor: Get Diagnostics": {
+      "main": [
+        [
+          {
+            "node": "Doctor: Get Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Doctor: Get Appointments": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diagnostics: Get Orders": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pharmacy: Get Prescriptions": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Billing: Get Bills": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insurance: Get Authorizations": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discharge: Get Checklist": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resources: Get All": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nursing: Get Assigned Patients": {
+      "main": [
+        [
+          {
+            "node": "Nursing: Get Open Journey Steps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nursing: Get Open Journey Steps": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bottlenecks: Get Open": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops: Get Patients": {
+      "main": [
+        [
+          {
+            "node": "Ops: Get Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops: Get Appointments": {
+      "main": [
+        [
+          {
+            "node": "Ops: Get Queues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops: Get Queues": {
+      "main": [
+        [
+          {
+            "node": "Ops: Get Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops: Get Resources": {
+      "main": [
+        [
+          {
+            "node": "Ops: Get Open Bottlenecks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ops: Get Open Bottlenecks": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finance: Get Summary Rows": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activity: Get Latest Audit": {
+      "main": [
+        [
+          {
+            "node": "Compute Agent Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Rejection": {
+      "main": [
+        [
+          {
+            "node": "Collect Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Response": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Agent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent Response": {
+      "main": [
+        [
+          {
+            "node": "Called via Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called via Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return to Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

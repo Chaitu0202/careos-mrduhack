@@ -1,0 +1,1658 @@
+{
+  "name": "CareOS · Suvarna ERP (Simulated API)",
+  "nodes": [
+    {
+      "id": "2cccf82a-1fa7-4488-91ed-a443c0ead75f",
+      "name": "ERP: GET patient",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/patients/:id",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "0f3e7778-82de-490c-acad-bab2c351ba69"
+    },
+    {
+      "id": "3fec088e-d30c-4841-958d-8c9b93a0cb19",
+      "name": "Get Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        128
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.params.id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e4b3e95b-b11f-40de-94e1-a76b06cd4555",
+      "name": "Shape Patient Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        128
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET patient';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst id = (wh.params || {}).id || '';\nconst rows = rowsOf('patient_id');\nif (!rows.length) return out(404, 'not_found', null, 'GET /suvarna/patients/' + id, id, 'Patient ' + id + ' not found');\nreturn out(200, 'success', rows[0], 'GET /suvarna/patients/' + id, id, 'Patient ' + rows[0].patient_name + ' returned');"
+      }
+    },
+    {
+      "id": "8b668c8a-149d-49ab-9a72-a2da342f38dd",
+      "name": "Respond with ERP Envelope",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        800,
+        992
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify(Object.assign({ system: 'suvarna_erp', simulated: true, status: $json.status, task_id: $json.task_id, data: $json.data }, $json.reason ? { reason: $json.reason } : {})) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code }}"
+        }
+      }
+    },
+    {
+      "id": "7f19a281-f3cf-4725-9417-c8d9434c7c61",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1024,
+        992
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_time": "={{ $now.toISO() }}",
+            "task_id": "={{ $json.task_id }}",
+            "user_role": "={{ $json.user_role }}",
+            "user_ref": "={{ $json.user_ref }}",
+            "request": "={{ $json.request }}",
+            "from_agent": "={{ $json.from_agent }}",
+            "to_agent": "suvarna_erp",
+            "action": "={{ $json.action }}",
+            "system": "suvarna_erp",
+            "patient_id": "={{ $json.patient_id }}",
+            "result_status": "={{ $json.status }}",
+            "result_summary": "={{ $json.summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_time",
+              "displayName": "log_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_role",
+              "displayName": "user_role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_ref",
+              "displayName": "user_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from_agent",
+              "displayName": "from_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "to_agent",
+              "displayName": "to_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_status",
+              "displayName": "result_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_summary",
+              "displayName": "result_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d90a46e9-4d12-4e2e-917f-cd425814a696",
+      "name": "ERP: GET appointments",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/appointments",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "37545b52-4022-4a8a-8519-c07366755f48"
+    },
+    {
+      "id": "1d3af8d0-99e1-4357-a327-3ef0d5b33fba",
+      "name": "Get Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6c00560c-32fd-4a72-ada2-9778fa3a44de",
+      "name": "Filter & Shape Appointments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET appointments';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst q = wh.query || {};\nlet rows = rowsOf('appointment_id');\nif (q.patient_id) rows = rows.filter(r => r.patient_id === q.patient_id);\nif (q.doctor_id) rows = rows.filter(r => r.doctor_id === q.doctor_id);\nif (q.date) rows = rows.filter(r => r.appt_date === q.date);\nif (q.department) rows = rows.filter(r => String(r.department || '').toLowerCase().includes(String(q.department).toLowerCase()));\nrows.sort((a, b) => (a.appt_date + a.appt_time).localeCompare(b.appt_date + b.appt_time));\nreturn out(200, 'success', rows, 'GET /suvarna/appointments', q.patient_id || '', rows.length + ' appointments returned');"
+      }
+    },
+    {
+      "id": "70e32172-ff5a-4319-a012-7ecbc2ec8ff3",
+      "name": "ERP: POST appointment",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        384
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "suvarna/appointments",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "31016f21-1cd9-45b3-b909-8abd44b2b3d3"
+    },
+    {
+      "id": "da3feffb-1860-4471-a7e5-073422a9c310",
+      "name": "Validate New Appointment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        608
+      ],
+      "parameters": {
+        "jsCode": "const b = $('ERP: POST appointment').first().json.body || {};\nconst req = ['patient_id', 'doctor_id', 'appt_date', 'appt_time'];\nconst missing = req.filter(k => b[k] === undefined || b[k] === null || String(b[k]).trim() === '');\nreturn [{ json: { valid: missing.length === 0, missing: missing, body: b } }];"
+      }
+    },
+    {
+      "id": "9139c207-5e38-4e60-afe6-4e52e88d034d",
+      "name": "Is Valid Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        608
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "fe9a8d3d-fefe-43ba-b741-28b7274a1636",
+      "name": "Get Existing Appointment IDs",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        512
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b05a1074-b993-44a0-a7e7-938a18f5d6c6",
+      "name": "Build New Appointment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        512
+      ],
+      "parameters": {
+        "jsCode": "const b = $('Validate New Appointment').first().json.body;\nconst h = $('ERP: POST appointment').first().json.headers || {};\nlet max = 5000;\nfor (const i of $input.all()) {\n  const m = String(i.json.appointment_id || '').match(/^APT(\\d+)$/);\n  if (m) max = Math.max(max, parseInt(m[1], 10));\n}\nreturn [{ json: {\n  appointment_id: 'APT' + (max + 1),\n  patient_id: String(b.patient_id),\n  doctor_id: String(b.doctor_id),\n  department: String(b.department || ''),\n  appt_date: String(b.appt_date),\n  appt_time: String(b.appt_time),\n  erp_appt_time: String(b.appt_time),\n  status: 'scheduled',\n  queue_token: String(b.queue_token || ''),\n  booked_by: String(b.booked_by || h['x-careos-agent'] || 'external'),\n  updated_at: new Date().toISOString()\n} }];"
+      }
+    },
+    {
+      "id": "f21f35c2-6de7-4fd8-97ba-d5f8a0505b3a",
+      "name": "Insert Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        512
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appointment_id": "={{ $json.appointment_id }}",
+            "patient_id": "={{ $json.patient_id }}",
+            "doctor_id": "={{ $json.doctor_id }}",
+            "department": "={{ $json.department }}",
+            "appt_date": "={{ $json.appt_date }}",
+            "appt_time": "={{ $json.appt_time }}",
+            "erp_appt_time": "={{ $json.erp_appt_time }}",
+            "status": "={{ $json.status }}",
+            "queue_token": "={{ $json.queue_token }}",
+            "booked_by": "={{ $json.booked_by }}",
+            "updated_at": "={{ $json.updated_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "appointment_id",
+              "displayName": "appointment_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "doctor_id",
+              "displayName": "doctor_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_date",
+              "displayName": "appt_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_time",
+              "displayName": "appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "erp_appt_time",
+              "displayName": "erp_appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "queue_token",
+              "displayName": "queue_token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "booked_by",
+              "displayName": "booked_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4d027e89-b708-40a4-b350-be6afb7f5484",
+      "name": "Shape Created Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        512
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: POST appointment';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst a = clean($('Build New Appointment').first().json);\nreturn out(201, 'success', a, 'POST /suvarna/appointments', a.patient_id, 'Created ' + a.appointment_id + ' for ' + a.patient_id + ' on ' + a.appt_date + ' ' + a.appt_time);"
+      }
+    },
+    {
+      "id": "bb855303-9071-44dc-9e72-9cf2aa163f0b",
+      "name": "Create Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        608
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "9999392d-d90a-4eb1-a6de-10bde2b3a865",
+      "name": "Shape Invalid Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        704
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: POST appointment';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst v = $input.first().json;\nreturn out(400, 'invalid_request', { missing_fields: v.missing }, 'POST /suvarna/appointments', (v.body || {}).patient_id, 'Rejected: missing ' + v.missing.join(', '), 'missing required fields: ' + v.missing.join(', '));"
+      }
+    },
+    {
+      "id": "259a893f-5c36-46cf-8f1b-efc647733553",
+      "name": "ERP: PATCH appointment",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        576
+      ],
+      "parameters": {
+        "httpMethod": "PATCH",
+        "path": "suvarna/appointments/:id",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "6c8c83b6-02b3-40ec-b210-c145bfdb16e2"
+    },
+    {
+      "id": "f4f125ff-aaab-474a-96f7-0eae9868ebb0",
+      "name": "Get Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        800
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "appointment_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.params.id }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "50722d68-a27c-497d-8933-5a494607e976",
+      "name": "Appointment Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "found",
+              "leftValue": "={{ $json.appointment_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "6bb6f1ad-1190-4378-948c-3e3ed429ef2d",
+      "name": "Update Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        704
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "rxa0JWNTfRRfCzYy",
+          "cachedResultName": "careos_appointments"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "appointment_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.appointment_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "appt_date": "={{ $('ERP: PATCH appointment').first().json.body.appt_date || $json.appt_date }}",
+            "appt_time": "={{ $('ERP: PATCH appointment').first().json.body.appt_time || $json.appt_time }}",
+            "erp_appt_time": "={{ $('ERP: PATCH appointment').first().json.body.erp_appt_time || $('ERP: PATCH appointment').first().json.body.appt_time || $json.erp_appt_time }}",
+            "status": "={{ $('ERP: PATCH appointment').first().json.body.status || $json.status }}",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "appt_date",
+              "displayName": "appt_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "appt_time",
+              "displayName": "appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "erp_appt_time",
+              "displayName": "erp_appt_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fad162c7-a632-468a-8ece-43210d1d8efd",
+      "name": "Shape Updated Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        704
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: PATCH appointment';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst before = clean($('Get Appointment').first().json);\nconst b = wh.body || {};\nconst after = Object.assign({}, before, {\n  appt_date: b.appt_date || before.appt_date,\n  appt_time: b.appt_time || before.appt_time,\n  erp_appt_time: b.erp_appt_time || b.appt_time || before.erp_appt_time,\n  status: b.status || before.status\n});\nreturn out(200, 'success', { before: before, after: after }, 'PATCH /suvarna/appointments/' + before.appointment_id, before.patient_id, 'Updated ' + before.appointment_id + ': ' + before.appt_date + ' ' + before.appt_time + ' -> ' + after.appt_date + ' ' + after.appt_time + ' (' + after.status + ')');"
+      }
+    },
+    {
+      "id": "87563049-4d58-42a5-9af0-9722994e7910",
+      "name": "Patch Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        800
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "45ef1911-92b5-4124-8b28-3c25630d40fa",
+      "name": "Shape Appointment Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        896
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: PATCH appointment';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst id = (wh.params || {}).id || '';\nreturn out(404, 'not_found', null, 'PATCH /suvarna/appointments/' + id, '', 'Appointment ' + id + ' not found');"
+      }
+    },
+    {
+      "id": "4a07b5b7-3b0f-4900-9f7d-9d3e9ef7ef3d",
+      "name": "ERP: GET billing",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        768
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/billing/:patientId",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "e1952dd6-2a04-4068-bd39-7e60e6181d51"
+    },
+    {
+      "id": "2b738065-1918-4c31-a449-6c52eba05c78",
+      "name": "Get Billing",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        896
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "oFaKx2Nxh7zGkaqR",
+          "cachedResultName": "careos_billing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.params.patientId }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ebc3fb6b-68bb-4ab0-acd6-1dce013c9b97",
+      "name": "Shape Billing Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        896
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET billing';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst pid = (wh.params || {}).patientId || '';\nconst rows = rowsOf('bill_id');\nif (!rows.length) return out(404, 'not_found', null, 'GET /suvarna/billing/' + pid, pid, 'No billing record for ' + pid);\nconst b = rows[0];\nreturn out(200, 'success', b, 'GET /suvarna/billing/' + pid, pid, b.bill_id + ' ' + b.billing_status + ', outstanding INR ' + b.outstanding_amount + ', clearance ' + b.clearance_status);"
+      }
+    },
+    {
+      "id": "d8843e26-6d2f-4e18-bdfa-f32e0190f31e",
+      "name": "ERP: GET insurance",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        960
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/insurance/:patientId",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "fdcc76cc-b3aa-4745-82ba-c2a896480186"
+    },
+    {
+      "id": "87676799-efce-45f3-96d2-0a85a395985e",
+      "name": "Get Insurance",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        1088
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "zU5f30Jv8jEF8zxh",
+          "cachedResultName": "careos_insurance"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.params.patientId }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6919ec3e-9404-42c5-ac04-c05fb97b23d7",
+      "name": "Shape Insurance Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET insurance';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst pid = (wh.params || {}).patientId || '';\nconst rows = rowsOf('auth_id');\nif (!rows.length) return out(404, 'not_found', null, 'GET /suvarna/insurance/' + pid, pid, 'No insurance authorization for ' + pid);\nconst a = rows[0];\nreturn out(200, 'success', a, 'GET /suvarna/insurance/' + pid, pid, a.auth_id + ' ' + a.insurer + ' ' + a.auth_status + (a.pending_documents ? ' (pending: ' + a.pending_documents + ')' : ''));"
+      }
+    },
+    {
+      "id": "aa0a042c-eb20-4cad-9b77-a003dc8c3c2d",
+      "name": "ERP: GET inventory",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1152
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/inventory",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "7ed984ce-75c1-4b9a-b398-9231b7982c12"
+    },
+    {
+      "id": "476de371-acc9-43dc-9567-2ee037603f0c",
+      "name": "Get Pharmacy Inventory",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        1280
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "UTwiiaXEfwyFp6Qa",
+          "cachedResultName": "careos_pharmacy"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "88ba2d07-9a86-4efc-9da2-d03c17db9985",
+      "name": "Shape Inventory Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        1280
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET inventory';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst rows = rowsOf('rx_id').map(r => ({ rx_id: r.rx_id, patient_id: r.patient_id, medicines: r.medicines, stock_status: r.stock_status, rx_status: r.rx_status, updated_at: r.updated_at }));\nconst byStock = {};\nfor (const r of rows) byStock[r.stock_status] = (byStock[r.stock_status] || 0) + 1;\nreturn out(200, 'success', { items: rows, stock_summary: byStock }, 'GET /suvarna/inventory', '', rows.length + ' pharmacy items; ' + JSON.stringify(byStock));"
+      }
+    },
+    {
+      "id": "cf2d4c29-f075-4021-a057-30fa56cec308",
+      "name": "ERP: GET staff",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1344
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/staff",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "6c3b20e1-820c-413b-8c9e-bd559cd9e116"
+    },
+    {
+      "id": "4fad9fa0-ffa0-4bf8-ab78-9725c87bd1c6",
+      "name": "Get Staff",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        1472
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "090114bb-287c-4e51-848c-79ccae59cbac",
+      "name": "Shape Staff Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        1472
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET staff';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst q = wh.query || {};\nlet rows = rowsOf('doctor_id');\nif (q.department) rows = rows.filter(r => String(r.department || '').toLowerCase().includes(String(q.department).toLowerCase()));\nif (q.status) rows = rows.filter(r => r.status === q.status);\nrows.sort((a, b) => a.doctor_id.localeCompare(b.doctor_id));\nreturn out(200, 'success', rows, 'GET /suvarna/staff', '', rows.length + ' staff records returned');"
+      }
+    },
+    {
+      "id": "5bd4783b-de04-4609-8b3e-9c3a456e56f7",
+      "name": "ERP: GET resources",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1536
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/resources",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "e423435c-560d-48a2-8a0e-9abfbcb03529"
+    },
+    {
+      "id": "9634e416-a063-45c7-9da6-4dec17a8bd65",
+      "name": "Get Resources",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        1664
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ujvBEqPWnzNl3JyK",
+          "cachedResultName": "careos_resources"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "eb00d2db-6d3c-4294-b229-aa3cc84f543b",
+      "name": "Shape Resources Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        1664
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET resources';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst q = wh.query || {};\nlet rows = rowsOf('resource_id');\nif (q.resource_type) rows = rows.filter(r => String(r.resource_type || '').toLowerCase().includes(String(q.resource_type).toLowerCase()));\nif (q.status) rows = rows.filter(r => r.status === q.status);\nconst summary = {};\nfor (const r of rows) { summary[r.resource_type] = summary[r.resource_type] || {}; summary[r.resource_type][r.status] = (summary[r.resource_type][r.status] || 0) + 1; }\nreturn out(200, 'success', { resources: rows, summary: summary }, 'GET /suvarna/resources', '', rows.length + ' resources returned');"
+      }
+    },
+    {
+      "id": "f63b463b-b63a-493a-9b4e-255dc9642ab6",
+      "name": "ERP: GET finance summary",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        1728
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "suvarna/finance/summary",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "ddb92fc5-089a-4df0-8e52-c0b0ab326df1"
+    },
+    {
+      "id": "82077c4f-97db-4faf-b025-fbd403ab5b0e",
+      "name": "Authorized Finance Role?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        272,
+        1952
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "role",
+              "leftValue": "={{ ['admin', 'finance'].includes(String(($json.headers || {})['x-careos-role'] || '').toLowerCase()) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "dbc5b4b3-4d03-4bf6-9dc8-99715200e693",
+      "name": "Get Finance",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        1856
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "A6PoavQF7PmTxQLE",
+          "cachedResultName": "careos_finance"
+        },
+        "returnAll": true
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "6e2b1a45-e858-4b69-9a18-9c39508fa925",
+      "name": "Shape Finance Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1856
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET finance summary';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nconst rows = rowsOf('department');\nconst t = { revenue: 0, expenses: 0, outstanding_receivables: 0, payments_collected: 0 };\nfor (const r of rows) { t.revenue += r.revenue || 0; t.expenses += r.expenses || 0; t.outstanding_receivables += r.outstanding_receivables || 0; t.payments_collected += r.payments_collected || 0; }\nt.operating_margin = t.revenue - t.expenses;\nreturn out(200, 'success', { period: rows.length ? rows[0].period : '', totals: t, departments: rows }, 'GET /suvarna/finance/summary', '', 'Finance summary for ' + rows.length + ' departments, revenue INR ' + t.revenue);"
+      }
+    },
+    {
+      "id": "d4948b4d-f535-4dca-9b36-2e6aa8510ae1",
+      "name": "Finance Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        944,
+        1952
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "fe548ecc-d747-49c3-ad1e-ec88c6566708",
+      "name": "Shape Finance Forbidden",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        2048
+      ],
+      "parameters": {
+        "jsCode": "const WH = 'ERP: GET finance summary';\n\nconst wh = $(WH).first().json;\nconst h = wh.headers || {};\nconst meta = {\n  from_agent: h['x-careos-agent'] || 'external',\n  user_role: h['x-careos-role'] || 'unknown',\n  user_ref: h['x-careos-user'] || '',\n  task_id: h['x-careos-task'] || ('TASK-' + Date.now())\n};\nconst clean = (r) => { const o = Object.assign({}, r); delete o.id; delete o.createdAt; delete o.updatedAt; return o; };\nconst rowsOf = (key) => $input.all().map(i => i.json).filter(r => r && r[key] !== undefined && r[key] !== null && r[key] !== '').map(clean);\nconst out = (http_code, status, data, action, patient_id, summary, reason) => [{ json: Object.assign({\n  http_code: http_code, status: status, data: data, action: action, patient_id: patient_id || '',\n  summary: summary, reason: reason || '',\n  request: action + ' params=' + JSON.stringify(wh.params || {}) + ' query=' + JSON.stringify(wh.query || {})\n}, meta) }];\n\nreturn out(403, 'forbidden', null, 'GET /suvarna/finance/summary', '', 'Finance access denied for role ' + meta.user_role, 'finance data restricted');"
+      }
+    }
+  ],
+  "connections": {
+    "ERP: GET patient": {
+      "main": [
+        [
+          {
+            "node": "Get Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Patient": {
+      "main": [
+        [
+          {
+            "node": "Shape Patient Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Patient Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond with ERP Envelope": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET appointments": {
+      "main": [
+        [
+          {
+            "node": "Get Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Appointments": {
+      "main": [
+        [
+          {
+            "node": "Filter & Shape Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Shape Appointments": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: POST appointment": {
+      "main": [
+        [
+          {
+            "node": "Validate New Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate New Appointment": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Request?": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Appointment IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape Invalid Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Appointment IDs": {
+      "main": [
+        [
+          {
+            "node": "Build New Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build New Appointment": {
+      "main": [
+        [
+          {
+            "node": "Insert Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Appointment": {
+      "main": [
+        [
+          {
+            "node": "Shape Created Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Created Response": {
+      "main": [
+        [
+          {
+            "node": "Create Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Result": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Invalid Request": {
+      "main": [
+        [
+          {
+            "node": "Create Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: PATCH appointment": {
+      "main": [
+        [
+          {
+            "node": "Get Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Appointment": {
+      "main": [
+        [
+          {
+            "node": "Appointment Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointment Found?": {
+      "main": [
+        [
+          {
+            "node": "Update Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape Appointment Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Appointment": {
+      "main": [
+        [
+          {
+            "node": "Shape Updated Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Updated Response": {
+      "main": [
+        [
+          {
+            "node": "Patch Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch Result": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Appointment Not Found": {
+      "main": [
+        [
+          {
+            "node": "Patch Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET billing": {
+      "main": [
+        [
+          {
+            "node": "Get Billing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Billing": {
+      "main": [
+        [
+          {
+            "node": "Shape Billing Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Billing Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET insurance": {
+      "main": [
+        [
+          {
+            "node": "Get Insurance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Insurance": {
+      "main": [
+        [
+          {
+            "node": "Shape Insurance Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Insurance Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET inventory": {
+      "main": [
+        [
+          {
+            "node": "Get Pharmacy Inventory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pharmacy Inventory": {
+      "main": [
+        [
+          {
+            "node": "Shape Inventory Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Inventory Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET staff": {
+      "main": [
+        [
+          {
+            "node": "Get Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Staff": {
+      "main": [
+        [
+          {
+            "node": "Shape Staff Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Staff Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET resources": {
+      "main": [
+        [
+          {
+            "node": "Get Resources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Resources": {
+      "main": [
+        [
+          {
+            "node": "Shape Resources Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Resources Response": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ERP: GET finance summary": {
+      "main": [
+        [
+          {
+            "node": "Authorized Finance Role?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized Finance Role?": {
+      "main": [
+        [
+          {
+            "node": "Get Finance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shape Finance Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Finance": {
+      "main": [
+        [
+          {
+            "node": "Shape Finance Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Finance Response": {
+      "main": [
+        [
+          {
+            "node": "Finance Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finance Result": {
+      "main": [
+        [
+          {
+            "node": "Respond with ERP Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Finance Forbidden": {
+      "main": [
+        [
+          {
+            "node": "Finance Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}

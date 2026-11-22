@@ -1,0 +1,1389 @@
+{
+  "name": "CareOS · WF3 Discharge Bottleneck Analysis",
+  "nodes": [
+    {
+      "id": "71637777-2714-43e0-b68a-ac8b8797234b",
+      "name": "When Called by Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "task_id",
+              "type": "string"
+            },
+            {
+              "name": "from_agent",
+              "type": "string"
+            },
+            {
+              "name": "patient_id",
+              "type": "string"
+            },
+            {
+              "name": "user_role",
+              "type": "string"
+            },
+            {
+              "name": "user_ref",
+              "type": "string"
+            },
+            {
+              "name": "request_text",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cb7ef7c3-72dc-4f98-a9cb-ee649ca41781",
+      "name": "Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        224
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json || {};\nconst isWebhook = !!(raw.body && typeof raw.body === 'object' && raw.headers);\nconst src = isWebhook ? raw.body : raw;\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nreturn [{ json: {\n  channel: isWebhook ? 'webhook' : 'tool',\n  task_id: s(src.task_id) || ('TASK-' + Date.now()),\n  from_agent: s(src.from_agent) || 'careos_orchestrator',\n  patient_id: s(src.patient_id).toUpperCase(),\n  user_role: s(src.user_role).toLowerCase(),\n  user_ref: s(src.user_ref),\n  request_text: s(src.request_text)\n} }];"
+      }
+    },
+    {
+      "id": "2f266c55-5ca2-4d72-8d46-7f746424a6db",
+      "name": "Discharge Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "careos/discharge/analyze",
+        "responseMode": "responseNode"
+      },
+      "webhookId": "ccb82ead-44f7-403b-ae9c-d1b4d845a3d4"
+    },
+    {
+      "id": "7ac0953c-d587-4cc4-9e44-276fc4f4db1d",
+      "name": "Get Patient",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        496,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "E9eLqZQyppLNLXNn",
+          "cachedResultName": "careos_patients"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f1704deb-4ca2-45de-bdfa-c90513baa5ec",
+      "name": "Get Attending Doctor",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WxdeE8a1VdKYbYrO",
+          "cachedResultName": "careos_doctors"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "doctor_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get Patient').first().json.attending_doctor_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "54673483-9bc4-4e47-9bf9-2dae63122407",
+      "name": "Journey Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "9C2EsBnXy4kQxIy0",
+          "cachedResultName": "careos_journey_events"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a2336f44-eacc-40eb-9e9a-068c5a9e6fe6",
+      "name": "Discharge Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1168,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "liKwLLS4NqhcpeU1",
+          "cachedResultName": "careos_discharge"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "c2c6712d-db44-4839-be07-63a2e0e4ecf3",
+      "name": "Billing Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "oFaKx2Nxh7zGkaqR",
+          "cachedResultName": "careos_billing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "e0e2d416-106d-4518-aed7-f30e9fef68c8",
+      "name": "Insurance Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1616,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "zU5f30Jv8jEF8zxh",
+          "cachedResultName": "careos_insurance"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "079f10ad-3b49-4a96-8632-7000e067064c",
+      "name": "Pharmacy Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1840,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "UTwiiaXEfwyFp6Qa",
+          "cachedResultName": "careos_pharmacy"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "5b58345d-4b71-4ea6-a55e-1d82196808aa",
+      "name": "Diagnostics Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2064,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "7Vfz2HWKXSdeTXtH",
+          "cachedResultName": "careos_diagnostics"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "patient_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a2cbe899-e061-4e9f-8017-f933d62fa6cf",
+      "name": "Bed Agent",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2288,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "ujvBEqPWnzNl3JyK",
+          "cachedResultName": "careos_resources"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "resource_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get Patient').first().json.bed_id || '__none__' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "2cb3b039-c74f-44f6-86e3-8755f599b256",
+      "name": "Get Open Bottlenecks",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2512,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "t9RenMeEhNmYowc6",
+          "cachedResultName": "careos_bottlenecks"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "affected",
+              "condition": "eq",
+              "keyValue": "={{ $('Normalize Request').first().json.patient_id || '__none__' }}"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "={{ 'open' }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "8ab72b4a-4bbd-488f-b193-3973b1c65b8e",
+      "name": "Aggregate Discharge Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Normalize Request').first().json;\nconst clean = (name, key) => $(name).all().map(i => i.json).filter(r => r && r[key]);\nconst s = (v) => (v === undefined || v === null) ? '' : String(v).trim();\nconst low = (v) => s(v).toLowerCase();\nconst nowMs = Date.now();\nconst nowIso = new Date(nowMs).toISOString();\n\nconst out = { req: req, status: 'error', reason: '', write: false };\nconst finish = () => [{ json: out }];\n\nif (!req.patient_id) { out.reason = 'patient_id required'; return finish(); }\nconst allowed = ['patient', 'doctor', 'nurse', 'admin', 'operations'];\nif (allowed.indexOf(req.user_role) === -1) { out.status = 'forbidden'; out.reason = 'role ' + (req.user_role || '(none)') + ' may not run discharge analysis'; return finish(); }\nif (req.user_role === 'patient' && req.user_ref.toUpperCase() !== req.patient_id) { out.status = 'forbidden'; out.reason = 'patients may only view their own discharge status'; return finish(); }\n\nconst patient = clean('Get Patient', 'patient_id')[0];\nif (!patient) { out.status = 'not_found'; out.reason = 'patient ' + req.patient_id + ' not found'; return finish(); }\nconst doctor = clean('Get Attending Doctor', 'doctor_id')[0];\nconst journey = clean('Journey Agent', 'event_id');\nconst dis = clean('Discharge Agent', 'patient_id')[0];\nconst bills = clean('Billing Agent', 'bill_id');\nconst auths = clean('Insurance Agent', 'auth_id');\nconst rxs = clean('Pharmacy Agent', 'rx_id');\nconst diags = clean('Diagnostics Agent', 'order_id');\nconst bed = clean('Bed Agent', 'resource_id')[0];\nconst openBn = clean('Get Open Bottlenecks', 'bottleneck_id').filter(b => low(b.status) === 'open');\n\nconst docLabel = doctor ? (doctor.doctor_name + ' (' + doctor.doctor_id + ')') : (patient.attending_doctor_id || 'Attending doctor');\nconst unavailable = [];\nconst agents = [];\nconst mark = (agent, system, ok, note) => { agents.push({ agent: agent, system: system, status: ok ? 'success' : 'unavailable', note: note }); if (!ok) unavailable.push(agent); };\n\n// Journey\nconst openSteps = journey.filter(e => ['pending', 'in_progress', 'blocked'].indexOf(low(e.status)) !== -1).map(e => e.event_type + ':' + low(e.status));\nmark('journey_agent', 'careos_data_layer', journey.length > 0, journey.length ? (journey.length + ' events; open ' + (openSteps.join(', ') || 'none')) : 'no journey events');\n// Discharge checklist\nmark('discharge_agent', 'careos_data_layer', !!dis, dis ? 'checklist found' : 'no discharge checklist');\n// Diagnostics\nconst pendingDx = diags.filter(d => low(d.review_status) === 'pending' || ['ordered', 'scheduled', 'in_progress'].indexOf(low(d.status)) !== -1);\nmark('diagnostics_agent', 'careos_data_layer', true, diags.length + ' orders, ' + pendingDx.length + ' pending');\n// Billing\nconst outstanding = bills.reduce((a, b) => a + (Number(b.outstanding_amount) || 0), 0);\nmark('billing_agent', 'suvarna_erp', bills.length > 0 || !!dis, bills.length ? ('outstanding INR ' + outstanding) : 'no bill in ERP');\n// Insurance\nconst auth = auths[0];\nmark('insurance_agent', 'suvarna_erp', auths.length > 0 || !!dis, auth ? (auth.insurer + ' ' + auth.auth_status) : 'no authorization record');\n// Pharmacy\nconst rx = rxs.find(r => r.discharge_meds === true || low(r.discharge_meds) === 'true') || rxs[0];\nmark('pharmacy_agent', 'suvarna_erp', rxs.length > 0 || !!dis, rx ? (rx.rx_id + ' ' + rx.rx_status + '/' + rx.stock_status) : 'no prescription');\n// Bed\nmark('bed_agent', 'careos_data_layer', !!bed, bed ? (bed.resource_id + ' ' + bed.status) : 'bed record unavailable');\n\n// Clearances\nconst cl = {};\nconst pendingReview = diags.filter(d => low(d.review_status) === 'pending');\nconst docCl = dis ? low(dis.doctor_clearance) : '';\nif (!dis && !diags.length) cl.clinical = 'unavailable';\nelse if (pendingReview.length) cl.clinical = 'pending - doctor review of ' + pendingReview.map(d => d.order_id + ' ' + d.test_name).join(', ');\nelse if (docCl && docCl !== 'complete') cl.clinical = 'pending - doctor clearance ' + docCl;\nelse if (!dis) cl.clinical = 'unavailable';\nelse cl.clinical = 'complete';\n\ncl.diagnostics = pendingDx.length ? ('pending - ' + pendingDx.map(d => d.order_id + ' ' + d.test_name + ' (' + (low(d.review_status) === 'pending' ? 'review pending' : low(d.status)) + ')').join(', ')) : (diags.length ? 'complete' : 'no orders');\n\nif (rx) {\n  const rs = low(rx.rx_status), st = low(rx.stock_status);\n  cl.pharmacy = (rs === 'ready' || rs === 'dispensed') && st !== 'out_of_stock' ? 'ready' : ('pending - ' + rx.rx_id + ' ' + rs + (st === 'out_of_stock' ? ' (out of stock)' : ''));\n} else if (dis) cl.pharmacy = low(dis.pharmacy_clearance) === 'ready' ? 'ready' : ('pending - ' + low(dis.pharmacy_clearance));\nelse cl.pharmacy = 'unavailable';\n\nif (bills.length) {\n  const b = bills[0];\n  const bc = low(b.clearance_status);\n  cl.billing = (outstanding > 0 || (bc && bc !== 'cleared')) ? ('pending - outstanding INR ' + outstanding + (b.blocker ? ' (' + b.blocker + ')' : '')) : 'cleared';\n} else if (dis) cl.billing = low(dis.billing_clearance) === 'cleared' ? 'cleared' : ('pending - ' + low(dis.billing_clearance));\nelse cl.billing = 'unavailable';\n\nif (auth) {\n  const as = low(auth.auth_status);\n  cl.insurance = (as === 'approved' || as === 'not_applicable') ? as : ('pending - ' + auth.insurer + ' ' + auth.auth_id + ' ' + as + (s(auth.pending_documents) ? '; documents pending: ' + auth.pending_documents : ''));\n} else if (dis) { const ic = low(dis.insurance_clearance); cl.insurance = (ic === 'approved' || ic === 'not_applicable') ? ic : ('pending - ' + ic); }\nelse cl.insurance = 'unavailable';\n\ncl.summary = dis ? (low(dis.summary_status) === 'complete' ? 'complete' : ('pending - ' + low(dis.summary_status))) : 'unavailable';\ncl.transport = dis ? low(dis.transport_status) : 'unavailable';\ncl.bed = bed ? (bed.status + (bed.next_available ? ' (release planned ' + bed.next_available + ')' : '')) : (dis ? low(dis.bed_release_status) : 'unavailable');\n\n// Blockers in priority order\nconst blockers = [];\nconst add = (key, label, owner, action) => blockers.push({ key: key, label: label, owner: owner, action: action });\nif (cl.clinical.indexOf('pending') === 0) add('clinical', pendingReview.length ? 'Doctor review pending' : 'Clinical clearance pending', docLabel, pendingReview.length ? ('Ask ' + docLabel + ' to review ' + pendingReview.map(d => d.order_id + ' ' + d.test_name).join(', ') + ' and record clinical clearance') : ('Ask ' + docLabel + ' to complete clinical clearance'));\nif (cl.insurance.indexOf('pending') === 0) add('insurance', 'Insurance authorization pending', 'Insurance Desk', auth ? ('Insurance Desk to follow up with ' + auth.insurer + ' on ' + auth.auth_id + (s(auth.pending_documents) ? ' and submit: ' + auth.pending_documents : '')) : 'Insurance Desk to confirm authorization status');\nif (cl.billing.indexOf('pending') === 0) add('billing', 'Billing clearance pending', 'Billing Desk', 'Billing Desk to settle outstanding INR ' + outstanding + ' and issue final clearance');\nif (cl.pharmacy.indexOf('pending') === 0) add('pharmacy', 'Discharge medication pending', 'Pharmacy', 'Pharmacy to prepare discharge medicines');\nif (cl.summary.indexOf('pending') === 0) add('summary', 'Discharge summary pending', docLabel, docLabel + ' to finalise the discharge summary');\nif (['delayed', 'unavailable_vehicle', 'failed'].indexOf(cl.transport) !== -1) add('transport', 'Transport delayed', 'Transport Desk', 'Transport Desk to arrange vehicle');\n\nconst primary = blockers[0] || null;\nconst plannedMs = dis && dis.planned_discharge_at ? new Date(dis.planned_discharge_at).getTime() : null;\nconst minsPast = plannedMs ? Math.round((nowMs - plannedMs) / 60000) : null;\nconst existing = primary ? openBn[0] : null;\nconst ownerRef = primary ? (primary.key === 'clinical' || primary.key === 'summary' ? (doctor ? doctor.doctor_id : patient.attending_doctor_id) : primary.owner) : '';\nconst bnId = primary ? (existing ? existing.bottleneck_id : 'BN-' + nowMs) : null;\nconst stateTxt = primary ? ('Discharge blocked: ' + primary.label + (blockers.length > 1 ? '; also ' + blockers.slice(1).map(b => b.label).join(', ') : '')) : '';\n\nconst partial = unavailable.length ? ('Data unavailable from: ' + unavailable.join(', ') + '. Report is partial; not assumed complete.') : '';\nObject.assign(out, {\n  status: 'success', write: !!primary,\n  patient: { patient_id: patient.patient_id, patient_name: patient.patient_name, department: patient.department, bed_id: patient.bed_id },\n  clearances: cl, blockers: blockers, primary: primary, agents: agents, partial_data_note: partial,\n  minutes_past_planned: minsPast,\n  bn_mode: primary ? (existing ? 'update' : 'insert') : 'none',\n  bottleneck: primary ? {\n    bottleneck_id: bnId, affected: patient.patient_id, department: primary.key === 'clinical' || primary.key === 'summary' ? patient.department : primary.owner,\n    current_state: stateTxt, start_time: existing ? existing.start_time : nowIso,\n    duration_minutes: existing && existing.start_time ? Math.max(0, Math.round((nowMs - new Date(existing.start_time).getTime()) / 60000)) : Math.max(0, minsPast || 0),\n    root_cause: primary.label + ' (' + (cl[primary.key] || '') + ')', dependency: blockers.map(b => b.key).concat(['discharge']).join(' -> '),\n    owner: primary.owner, impact_patients: 1, severity: (minsPast !== null && minsPast > 120) ? 'high' : 'medium',\n    suggested_action: primary.action, status: 'open'\n  } : null,\n  notification: primary ? {\n    notification_id: 'NTF-' + nowMs, created_at_ts: nowIso, recipient_type: 'staff', recipient_ref: ownerRef, channel: 'in_app',\n    message: 'Discharge blocker for ' + patient.patient_name + ' (' + patient.patient_id + '): ' + primary.label + '. ' + primary.action + '.',\n    source_agent: 'discharge_agent', severity: (minsPast !== null && minsPast > 120) ? 'high' : 'medium', status: 'sent'\n  } : null\n});\nreturn finish();"
+      }
+    },
+    {
+      "id": "885f3b5e-9c17-404b-9a06-22ebc11d38aa",
+      "name": "Blocker Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "w",
+              "leftValue": "={{ $json.write }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a15fca7d-29a5-4035-8d14-1e0d02c002a7",
+      "name": "Open Bottleneck Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1248,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e",
+              "leftValue": "={{ $json.bn_mode }}",
+              "rightValue": "update",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "7697e365-8b92-47af-a232-7d46f58c1b5e",
+      "name": "Update Bottleneck",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        224
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "t9RenMeEhNmYowc6",
+          "cachedResultName": "careos_bottlenecks"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "bottleneck_id",
+              "condition": "eq",
+              "keyValue": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.bottleneck_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "current_state": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.current_state }}",
+            "duration_minutes": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.duration_minutes }}",
+            "root_cause": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.root_cause }}",
+            "dependency": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.dependency }}",
+            "owner": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.owner }}",
+            "suggested_action": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.suggested_action }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "current_state",
+              "displayName": "current_state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duration_minutes",
+              "displayName": "duration_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "root_cause",
+              "displayName": "root_cause",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dependency",
+              "displayName": "dependency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "suggested_action",
+              "displayName": "suggested_action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "87d26762-6a7e-4dc6-b7bd-5bb5073b72c3",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1696,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "nRHJwV5ivDhi5d9y",
+          "cachedResultName": "careos_notifications"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "notification_id": "={{ $('Aggregate Discharge Analysis').first().json.notification.notification_id }}",
+            "created_at_ts": "={{ $('Aggregate Discharge Analysis').first().json.notification.created_at_ts }}",
+            "recipient_type": "={{ $('Aggregate Discharge Analysis').first().json.notification.recipient_type }}",
+            "recipient_ref": "={{ $('Aggregate Discharge Analysis').first().json.notification.recipient_ref }}",
+            "channel": "={{ $('Aggregate Discharge Analysis').first().json.notification.channel }}",
+            "message": "={{ $('Aggregate Discharge Analysis').first().json.notification.message }}",
+            "source_agent": "={{ $('Aggregate Discharge Analysis').first().json.notification.source_agent }}",
+            "severity": "={{ $('Aggregate Discharge Analysis').first().json.notification.severity }}",
+            "status": "={{ $('Aggregate Discharge Analysis').first().json.notification.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "notification_id",
+              "displayName": "notification_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at_ts",
+              "displayName": "created_at_ts",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_type",
+              "displayName": "recipient_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "recipient_ref",
+              "displayName": "recipient_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channel",
+              "displayName": "channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "source_agent",
+              "displayName": "source_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "f007bc25-48e5-46f5-b9bb-381e8b04371b",
+      "name": "Create Bottleneck",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1472,
+        416
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "t9RenMeEhNmYowc6",
+          "cachedResultName": "careos_bottlenecks"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "bottleneck_id": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.bottleneck_id }}",
+            "affected": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.affected }}",
+            "department": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.department }}",
+            "current_state": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.current_state }}",
+            "start_time": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.start_time }}",
+            "duration_minutes": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.duration_minutes }}",
+            "root_cause": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.root_cause }}",
+            "dependency": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.dependency }}",
+            "owner": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.owner }}",
+            "impact_patients": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.impact_patients }}",
+            "severity": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.severity }}",
+            "suggested_action": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.suggested_action }}",
+            "status": "={{ $('Aggregate Discharge Analysis').first().json.bottleneck.status }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "bottleneck_id",
+              "displayName": "bottleneck_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "affected",
+              "displayName": "affected",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "current_state",
+              "displayName": "current_state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "start_time",
+              "displayName": "start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "duration_minutes",
+              "displayName": "duration_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "root_cause",
+              "displayName": "root_cause",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dependency",
+              "displayName": "dependency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "impact_patients",
+              "displayName": "impact_patients",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "suggested_action",
+              "displayName": "suggested_action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "1d31e75c-3cb0-4d66-8ffd-2c9c9fbc8627",
+      "name": "Build Audit Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        400
+      ],
+      "parameters": {
+        "jsCode": "const a = $('Aggregate Discharge Analysis').first().json;\nconst r = a.req;\nconst base = { log_time: new Date().toISOString(), task_id: r.task_id, user_role: r.user_role, user_ref: r.user_ref, request: r.request_text || ('discharge analysis ' + r.patient_id), patient_id: r.patient_id };\nconst rows = [];\nif (a.status !== 'success') {\n  rows.push(Object.assign({}, base, { from_agent: 'careos_orchestrator', to_agent: 'discharge_agent', action: 'analyze_discharge', system: 'careos_data_layer', result_status: a.status, result_summary: String(a.reason).slice(0, 480) }));\n} else {\n  (a.agents || []).forEach(g => rows.push(Object.assign({}, base, { from_agent: 'careos_orchestrator', to_agent: g.agent, action: 'discharge_dependency_check', system: g.system, result_status: g.status, result_summary: String(g.note).slice(0, 480) })));\n  rows.push(Object.assign({}, base, { from_agent: 'careos_orchestrator', to_agent: 'discharge_agent', action: 'analyze_discharge', system: 'careos_data_layer', result_status: 'success', result_summary: a.primary ? ('primary blocker: ' + a.primary.label + '; owner ' + a.primary.owner) : 'no blockers found' }));\n  if (a.write) {\n    rows.push(Object.assign({}, base, { from_agent: 'discharge_agent', to_agent: 'bottleneck_agent', action: a.bn_mode === 'update' ? 'update_bottleneck' : 'create_bottleneck', system: 'careos_data_layer', result_status: 'success', result_summary: a.bottleneck.bottleneck_id + ' ' + a.bottleneck.current_state }));\n    rows.push(Object.assign({}, base, { from_agent: 'discharge_agent', to_agent: 'notification', action: 'send_notification', system: 'careos_data_layer', result_status: 'success', result_summary: 'notified ' + a.notification.recipient_ref }));\n  }\n}\nreturn rows.map(j => ({ json: j }));"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "c5c07f1b-f8b9-4ec5-9d85-4a931e3f41cd",
+      "name": "Write Audit Log",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        320
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "DOIlPQUEoJ9c1hs5",
+          "cachedResultName": "careos_audit_log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_time": "={{ $json.log_time }}",
+            "task_id": "={{ $json.task_id }}",
+            "user_role": "={{ $json.user_role }}",
+            "user_ref": "={{ $json.user_ref }}",
+            "request": "={{ $json.request }}",
+            "from_agent": "={{ $json.from_agent }}",
+            "to_agent": "={{ $json.to_agent }}",
+            "action": "={{ $json.action }}",
+            "system": "={{ $json.system }}",
+            "patient_id": "={{ $json.patient_id }}",
+            "result_status": "={{ $json.result_status }}",
+            "result_summary": "={{ $json.result_summary }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_time",
+              "displayName": "log_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_role",
+              "displayName": "user_role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "user_ref",
+              "displayName": "user_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "request",
+              "displayName": "request",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "from_agent",
+              "displayName": "from_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "to_agent",
+              "displayName": "to_agent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "system",
+              "displayName": "system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "patient_id",
+              "displayName": "patient_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_status",
+              "displayName": "result_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "result_summary",
+              "displayName": "result_summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "26283b65-01f0-42d1-80a0-1b4281739a77",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        320
+      ],
+      "parameters": {
+        "jsCode": "const a = $('Aggregate Discharge Analysis').first().json;\nconst r = a.req;\nlet result;\nif (a.status !== 'success') {\n  result = { patient_id: r.patient_id, message: a.reason, action_note: 'No automatic clinical or financial action taken' };\n} else {\n  result = {\n    patient_id: a.patient.patient_id,\n    patient_name: a.patient.patient_name,\n    clearances: a.clearances,\n    primary_blocker: a.primary ? a.primary.label : 'none - all discharge dependencies clear',\n    secondary_blockers: a.blockers.slice(1).map(b => b.label),\n    owner: a.primary ? a.primary.owner : null,\n    recommended_action: a.primary ? a.primary.action : 'Proceed with discharge per protocol',\n    agents_consulted: a.agents.map(g => g.agent + ' (' + g.status + ')'),\n    bottleneck_id: a.bottleneck ? a.bottleneck.bottleneck_id : null,\n    minutes_past_planned_discharge: a.minutes_past_planned,\n    partial_data_note: a.partial_data_note,\n    action_note: 'No automatic clinical or financial action taken'\n  };\n}\nreturn [{ json: { task_id: r.task_id, agent: 'discharge_agent', status: a.status, result: result, _channel: r.channel } }];"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "4277775b-6aa4-4500-a804-a12dd67fb331",
+      "name": "Called via Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1776,
+        320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c",
+              "leftValue": "={{ $json._channel }}",
+              "rightValue": "webhook",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "486eb956-ec6e-4dac-8fbd-42f13d20b122",
+      "name": "Respond to Caller",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2000,
+        224
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}",
+        "options": {
+          "responseCode": "={{ ({ forbidden: 403, not_found: 404, error: 400 })[$json.status] || 200 }}"
+        }
+      }
+    },
+    {
+      "id": "d9c1fb9e-6088-4dfb-a7c9-ebe01e586d0f",
+      "name": "Return to Agent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2000,
+        416
+      ],
+      "parameters": {
+        "mode": "raw",
+        "includeOtherFields": false,
+        "options": {},
+        "jsonOutput": "={{ JSON.stringify({ task_id: $json.task_id, agent: $json.agent, status: $json.status, result: $json.result }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "When Called by Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Get Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discharge Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Patient": {
+      "main": [
+        [
+          {
+            "node": "Get Attending Doctor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Attending Doctor": {
+      "main": [
+        [
+          {
+            "node": "Journey Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Journey Agent": {
+      "main": [
+        [
+          {
+            "node": "Discharge Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discharge Agent": {
+      "main": [
+        [
+          {
+            "node": "Billing Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Billing Agent": {
+      "main": [
+        [
+          {
+            "node": "Insurance Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insurance Agent": {
+      "main": [
+        [
+          {
+            "node": "Pharmacy Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pharmacy Agent": {
+      "main": [
+        [
+          {
+            "node": "Diagnostics Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Diagnostics Agent": {
+      "main": [
+        [
+          {
+            "node": "Bed Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bed Agent": {
+      "main": [
+        [
+          {
+            "node": "Get Open Bottlenecks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Open Bottlenecks": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Discharge Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Discharge Analysis": {
+      "main": [
+        [
+          {
+            "node": "Blocker Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blocker Found?": {
+      "main": [
+        [
+          {
+            "node": "Open Bottleneck Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open Bottleneck Exists?": {
+      "main": [
+        [
+          {
+            "node": "Update Bottleneck",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Bottleneck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Bottleneck": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Owner": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Bottleneck": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Audit Rows": {
+      "main": [
+        [
+          {
+            "node": "Write Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Called via Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called via Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Respond to Caller",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return to Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "triggerCount": 0,
+  "meta": null
+}
